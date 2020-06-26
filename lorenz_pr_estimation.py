@@ -45,30 +45,39 @@ class LPE:
 			P     : P in writeup
 		"""
 		# store constant rule args as class attributes
-		if rule == 'rule0_c1' or rule == 'rule1_c1':
+		rn = rule[4] # rule number
+		cn = rule[-1] # condition number
+		if rn == '0' or rn == '1':
 			self.theta = kwargs['theta']
 			self.rho = kwargs['rho']
-			self.d = kwargs['d']
+			self.da = kwargs['da']
+			self.db = kwargs['db']
 
 			# initialize empty lists for storage
 			self.thetalist = []
 			self.rholist = []
 
-			if rule == 'rule1_c1':
+			if rn == '1':
 				self.P = 0
 				self.Pc = kwargs['Pc']
 
 		# return rule args
 		pr0 = self.pr0
-		if rule == 'rule0_c1':
-			ruleargs = [self, {0 : pr0}] # dict to track updated pr
+		if rn == '0':
+			ruleargs = [self, {0 : pr0}] # dict to track pr
 			self.ruleargs = ruleargs
 			return rule0_c1, ruleargs
 
-		elif rule == 'rule1_c1':
-			ruleargs = [self, {0 : pr0}] # dict to track updated pr
-			self.ruleargs = ruleargs
-			return rule1_c1, ruleargs
+		elif rn == '1':
+			if cn == '1':
+				ruleargs = [self, {0 : pr0}] # dict to track pr
+				self.ruleargs = ruleargs
+				return rule1_c1, ruleargs
+			elif cn == '2': 
+				# dict to track pr and arr to track uerr
+				ruleargs = [self, {0 : pr0}, np.full(1 + self.Pc, np.inf)]
+				self.ruleargs = ruleargs
+				return rule1_c2, ruleargs
 
 		elif rule == 'no_update':
 			return 1, 1
@@ -95,13 +104,13 @@ class LPE:
 		"""
 		updates rulesargs at each iteration. also stores updated rule args.
 		"""
-		if rule == 'rule0_c1' or rule == 'rule1_c1':
+		if rule == 'rule0_c1' or rule == 'rule1_c1' or rule == 'rule1_c2':
 			self.thetalist.append(self.theta)
 			self.rholist.append(self.rho)
 
-			if rule == 'rule1_c1':
+			if rule == 'rule1_c1' or rule == 'rule1_c2':
 				it = self.solver.iteration
-				prs = ruleargs[-1]
+				prs = ruleargs[1]
 				prev_pr = prs[it-1]
 				curr_pr = prs[it]
 				if curr_pr != prev_pr:
@@ -111,17 +120,18 @@ class LPE:
 
 
 	def simulate(self, pr0=20, mu=30, dt=1/2048, stop_it=1000, rule='no_update', nudge='x', ts=de.timesteppers.RK443,
-				 ic='initial_data/lorenz_data.h5', outfile='analysis', **kwargs):
+				 ic='initial_data/lorenz_data.h5', outfile='analysis', print_every=10, **kwargs):
 		"""
 			pr0   : initial value for tilde Prandtl
 			mu    : nudging parameter
 			dt    : time-step
-			stop_it: number of iterations
+			stop_it : number of iterations
 			rule  : update rule for tilde Prandtl
 			ts    : Dedalus time stepping scheme
 			nudge : (str) array or single string representing nudged coordinate(s)
 			ic    : (str) file path to h5 file containing initial conditions
-			out   : (str) file name for analysis to be saved under
+			outfile : (str) file name for analysis to be saved under
+			print_every : print progress message every x% to completion
 			kwargs: arguments for rule
 		"""
 		self.pr0 = pr0
@@ -201,10 +211,10 @@ class LPE:
 			percent = (it/stop_it)*100
 
 			# print progress msg
-			if percent % 10 == 0:
+			if percent % print_every == 0:
 				progress_msg = '{0:.0f}% complete. {1:.2f} sec elapsed.'.format(percent, time.time()-start)
 				if F != 1:
-					prs = ruleargs[-1]
+					prs = ruleargs[1]
 					curr_pr = prs[it]
 					pr_err = abs(self.PR - curr_pr)
 					progress_msg += ' Abs pr error: {:.8e}.'.format(pr_err)
