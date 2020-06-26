@@ -1,6 +1,8 @@
 *.ipynb
-*_data/
-*.h5
+result_data/
+test_data/
+analysis*
+data.h5
 System*/
 _*/
 figures/
