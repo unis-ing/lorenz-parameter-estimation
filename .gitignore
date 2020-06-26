@@ -4,3 +4,6 @@
 System*/
 _*/
 figures/
+lorenz_pr_estimation_discrete.py
+plot.py
+viz_helpers.py
