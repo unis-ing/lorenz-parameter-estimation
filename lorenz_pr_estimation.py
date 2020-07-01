@@ -61,6 +61,9 @@ class LPE:
 				self.P = 0
 				self.Pc = kwargs['Pc']
 
+				if cn == '2':
+					self.M = kwargs['M']
+
 		# return rule args
 		pr0 = self.pr0
 		if rn == '0':
@@ -120,7 +123,7 @@ class LPE:
 
 
 	def simulate(self, pr0=20, mu=30, dt=1/2048, stop_it=1000, rule='no_update', nudge='x', ts=de.timesteppers.RK443,
-				 ic='initial_data/lorenz_data.h5', outfile='analysis', print_every=10, **kwargs):
+				 ic='initial_data/PR_10_RA_28_ic.h5', outfile='analysis', print_every=10, **kwargs):
 		"""
 			pr0   : initial value for tilde Prandtl
 			mu    : nudging parameter
@@ -182,9 +185,9 @@ class LPE:
 		# initialize lorenz system
 		file = h5.File(ic, 'r')
 		tasks = file['tasks']
-		x0 = np.array(tasks['x'])[-1, 0]
-		y0 = np.array(tasks['y'])[-1, 0]
-		z0 = np.array(tasks['z'])[-1, 0]
+		x0 = np.array(tasks['x'])
+		y0 = np.array(tasks['y'])
+		z0 = np.array(tasks['z'])
 		file.close()
 
 		x, y, z = solver.state['x'], solver.state['y'], solver.state['z']
@@ -194,7 +197,7 @@ class LPE:
 		z['g'] = np.full(NS, fill_value=z0)
 
 		# set up analysis
-		analysis = solver.evaluator.add_file_handler(filename=outfile, iter=1)
+		analysis = solver.evaluator.add_file_handler(filename=outfile, iter=1, max_size=2**(31))
 		analysis.add_system(solver.state, layout='g')
 
 		solver.stop_sim_time = np.inf

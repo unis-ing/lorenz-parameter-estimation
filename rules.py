@@ -120,11 +120,13 @@ def rule1_c2(*args):
 		uerrs[:] = np.roll(uerrs, -1) # update
 		uerrs[-1] = uerr
 
-		m1 = np.mean(uerrs[:lpe.Pc])
-		m1 = np.log10(m1)
-		m2 = np.mean(uerrs[1:])
-		m2 = np.log10(m2)
-		if m2 - m1 >= 0.0002:
+		m1 = log10mean(uerrs[:-1])
+		m2 = log10mean(uerrs[1:])
+
+		c5 = m2 - m1 >= lpe.M
+		# threshold was not increased in the last X number of iterations
+		c6 = np.any(np.diff(lpe.thetalist[-lpe.Pc // 20:]) > 0)
+		if c5 and not c6:
 			lpe.theta /= lpe.da
 			lpe.rho /= lpe.db
 
@@ -146,3 +148,6 @@ def val(state):
 		state : solver.state attribute
 	"""
 	return state['g'][0]
+
+def log10mean(arr):
+	return np.log10(np.mean(arr))
