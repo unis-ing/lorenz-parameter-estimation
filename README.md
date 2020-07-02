@@ -1,4 +1,4 @@
-Code, data, and etc. produced in research under Professor Vincent Martinez at Hunter College.
+Code, data, and etc. produced in a research project under Professor Vincent Martinez at Hunter College.
 
 ## Prerequisites
 * `dedalus` is used to solve the Lorenz equations. An installation guide can be found [here](https://dedalus-project.readthedocs.io/en/latest/installation.html).
