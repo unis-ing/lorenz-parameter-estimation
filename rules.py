@@ -1,9 +1,10 @@
 """
-functions implementing different update rules for the LPE class and misc. helpers.
+functions implementing different update rules for the LPE class.
 
 rule functions are named as rule[rule #]_c[condition #]
 
 """
+from lpe_helpers import *
 import numpy as np
 
 def rule0(pr, mu, x, y, u, v):
@@ -132,22 +133,3 @@ def rule1_c2(*args):
 
 	prs[it] = newpr
 	return newpr
-
-def get(solver, s):
-	"""
-	Input
-		s : string which is the name of one of the solver states
-	Output
-		value at 0th place of state
-	"""
-	return solver.state[s]['g'][0]
-
-def val(state):
-	"""
-	Input
-		state : solver.state attribute
-	"""
-	return state['g'][0]
-
-def log10mean(arr):
-	return np.log10(np.mean(arr))

@@ -2,6 +2,7 @@ import numpy as np
 import dedalus.public as de
 from dedalus.core.operators import GeneralFunction
 import h5py as h5
+from lpe_helpers import *
 from rules import *
 import time
 
@@ -27,8 +28,8 @@ class LPE:
 
 		problem = de.IVP(domain, variables=['x', 'y', 'z', 'u', 'v', 'w', 'xt', 'yt', 'zt', 'ut', 'vt', 'wt'])
 		problem.parameters['PR'] = PR
-		problem.parameters['ra'] = RA
-		problem.parameters['b'] = B
+		problem.parameters['RA'] = RA
+		problem.parameters['B'] = B
 
 		self.basis = basis
 		self.domain = domain
@@ -94,7 +95,7 @@ class LPE:
 		"""
 		eqns = ['dt(u) = -pr*u + pr*v', 
 				'dt(v) + v = -pr*u - u*w', 
-				'dt(w) = -b*w + u*v - b*(ra+pr)']
+				'dt(w) = -B*w + u*v - B*(RA+pr)']
 		if 'x' in nudge:
 			eqns[0] += '- mu*(u-x)'
 		if 'y' in nudge:
@@ -123,7 +124,7 @@ class LPE:
 
 
 	def simulate(self, pr0=20, mu=30, dt=1/2048, stop_it=1000, rule='no_update', nudge='x', ts=de.timesteppers.RK443,
-				 ic='initial_data/PR_10_RA_28_ic.h5', outfile='analysis', print_every=10, **kwargs):
+				 outfile='analysis', print_every=10, **kwargs):
 		"""
 			pr0   : initial value for tilde Prandtl
 			mu    : nudging parameter
@@ -160,7 +161,7 @@ class LPE:
 		# lorenz equations
 		problem.add_equation('dt(x) = -PR*x + PR*y')
 		problem.add_equation('dt(y) + y = -PR*x - x*z')
-		problem.add_equation('dt(z) = -b*z + x*y - b*(ra+PR)')
+		problem.add_equation('dt(z) = -B*z + x*y - B*(RA+PR)')
 
 		# nudged lorenz equations
 		eqns = self.nudged_eqns(nudge)
@@ -183,21 +184,26 @@ class LPE:
 		self.solver = solver
 
 		# initialize lorenz system
-		file = h5.File(ic, 'r')
-		tasks = file['tasks']
-		x0 = np.array(tasks['x'])
-		y0 = np.array(tasks['y'])
-		z0 = np.array(tasks['z'])
-		file.close()
+		PR, RA, B, NS = self.PR, self.RA, self.B, self.NS
+		if not initial_data_exists(PR, RA):
+			print('Making initial data.')
+			make_initial_data(PR, RA, B, NS, dt)
+
+		fname = 'PR_' + str(PR) + '_RA_' + str(RA)
+		path = 'initial_data/' + fname  + '.h5'
+		f = h5.File(path, 'r')
+		x0 = np.array(f['x'])
+		y0 = np.array(f['y'])
+		z0 = np.array(f['z'])
+		f.close()
 
 		x, y, z = solver.state['x'], solver.state['y'], solver.state['z']
-		NS = self.NS
 		x['g'] = np.full(NS, fill_value=x0)
 		y['g'] = np.full(NS, fill_value=y0)
 		z['g'] = np.full(NS, fill_value=z0)
 
 		# set up analysis
-		analysis = solver.evaluator.add_file_handler(filename=outfile, iter=1, max_size=2**(31))
+		analysis = solver.evaluator.add_file_handler(filename=outfile, iter=1, max_size=2**(64))
 		analysis.add_system(solver.state, layout='g')
 
 		solver.stop_sim_time = np.inf
