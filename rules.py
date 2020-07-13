@@ -68,7 +68,8 @@ def rule1_c1(*args):
 	c1 = lpe.P >= lpe.Pc
 	c2 = uerr <= lpe.theta
 	c3 = uterr <= lpe.rho
-	c4 = it >= 5000
+	# c4 = it >= 5000
+	c4 = True
 	c5 = (uerr > 0) and (uterr > 0)
 
 	if c1 and c2 and c3 and c4 and c5:

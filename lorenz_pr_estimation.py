@@ -35,7 +35,7 @@ class LPE:
 		self.domain = domain
 		self.problem = problem
 
-	def setup_rule(self, rule, **kwargs):
+	def setup_rule(self, **kwargs):
 		"""
 		store rule args as class attributes. return the function and arguments associated to the given rule.
 			rule  : (str) name of existing rule function
@@ -45,14 +45,21 @@ class LPE:
 			Pc    : P* in writeup
 			P     : P in writeup
 		"""
-		# store constant rule args as class attributes
+		rule = self.rule
 		rn = rule[4] # rule number
 		cn = rule[-1] # condition number
+
 		if rn == '0' or rn == '1':
-			self.theta = kwargs['theta']
-			self.rho = kwargs['rho']
 			self.da = kwargs['da']
 			self.db = kwargs['db']
+
+			if rn == '1' and self.calc_thold: # option to calc tholds
+				theta, rho = self.calculate_thresholds_rule1()
+				self.theta = theta
+				self.rho = rho
+			else:
+				self.theta = kwargs['theta']
+				self.rho = kwargs['rho']
 
 			# initialize empty lists for storage
 			self.thetalist = []
@@ -61,7 +68,6 @@ class LPE:
 			if rn == '1':
 				self.P = 0
 				self.Pc = kwargs['Pc']
-
 				if cn == '2':
 					self.M = kwargs['M']
 
@@ -89,25 +95,11 @@ class LPE:
 		else:
 			return 0, 0
 
-	def nudged_eqns(self, nudge):
-		"""
-		return nudged lorenz equations.
-		"""
-		eqns = ['dt(u) = -pr*u + pr*v', 
-				'dt(v) + v = -pr*u - u*w', 
-				'dt(w) = -B*w + u*v - B*(RA+pr)']
-		if 'x' in nudge:
-			eqns[0] += '- mu*(u-x)'
-		if 'y' in nudge:
-			eqns[1] += '- mu*(v-y)'
-		if 'z' in nudge:
-			eqns[2] += '- mu*(w-z)'
-		return eqns
-
-	def update_ruleargs(self, rule, ruleargs):
+	def update_ruleargs(self, ruleargs):
 		"""
 		updates rulesargs at each iteration. also stores updated rule args.
 		"""
+		rule = self.rule
 		if rule == 'rule0_c1' or rule == 'rule1_c1' or rule == 'rule1_c2':
 			self.thetalist.append(self.theta)
 			self.rholist.append(self.rho)
@@ -122,9 +114,128 @@ class LPE:
 				else:
 					self.P += 1
 
+	def calculate_thresholds_rule1(self):
+		pr0 = self.pr0
+		mu = self.mu
+		th_path = get_th_path(self.PR, self.RA, self.mu)
+
+		if os.path.exists(th_path):
+			f = h5.File(th_path, 'r')
+			theta = np.array(f['theta'])[0]
+			rho = np.array(f['rho'])[0]
+			f.close()
+		else:
+			print('Solving nudged equations to calculate thresholds.')
+			self.make_thresholds_data()
+			p = 'analysis/analysis_s1/analysis_s1_p0.h5'
+
+			f  = h5.File(p, 'r')
+			t  = f['tasks']
+			x  = np.array(t['x'])[:,0]
+			u  = np.array(t['u'])[:,0]
+			v  = np.array(t['v'])[:,0]
+			xt = np.array(t['xt'])[:,0]
+			ut = np.array(t['ut'])[:,0]
+			f.close()
+
+			uerr = abs(x - u)
+			uterr = abs(xt - ut)
+
+			guess = rule1(pr=pr0, mu=mu, x=x, u=u, v=v)
+			guesserr = abs(self.PR - guess)
+			# only consider errors past 1,000th index
+			i = np.where(guesserr == min(guesserr))
+			minuerr = uerr[i]
+			minuterr = uterr[i]
+
+			floorlog = np.floor(np.log10(minuerr))
+			roundreciprocal = np.ceil(minuerr * 10**(-floorlog))
+			theta = roundreciprocal * 10**floorlog
+			theta = theta[0]
+
+			floorlog = np.floor(np.log10(minuterr))
+			roundreciprocal = np.ceil(minuterr * 10**(-floorlog))
+			rho = roundreciprocal * 10**floorlog
+			rho = rho[0]
+
+			# write to file
+			f = h5.File(th_path, 'a')
+			f.create_dataset('theta', data=np.array([theta]))
+			f.create_dataset('rho', data=np.array([rho]))
+			f.close()
+
+		return theta, rho
+
+	def make_thresholds_data(self):
+		"""
+		Make data for calculating thresholds by solving nudged Lorenz equations for 5 units of time.
+		"""
+		PR = self.PR
+		RA = self.RA
+		B = self.B
+		NS = self.NS
+		pr0 = self.pr0
+		mu = self.mu
+		dt = self.dt
+		nudge = self.nudge
+		ts = self.ts
+
+		basis = de.Chebyshev('s', NS, interval=(0,1), dealias=3/2)
+		domain = de.Domain([basis], grid_dtype=np.float64)
+
+		problem = de.IVP(domain, variables=['x', 'y', 'z', 'u', 'v', 'w', 'xt', 'yt', 'zt', 'ut', 'vt', 'wt'])
+		problem.parameters['PR'] = PR
+		problem.parameters['RA'] = RA
+		problem.parameters['B'] = B
+		problem.parameters['mu'] = mu
+		problem.parameters['pr'] = pr0
+
+		# lorenz equations
+		problem.add_equation('dt(x) = -PR*x + PR*y')
+		problem.add_equation('dt(y) + y = -PR*x - x*z')
+		problem.add_equation('dt(z) = -B*z + x*y - B*(RA+PR)')
+
+		# nudged lorenz equations
+		eqns = nudged_eqns(nudge)
+		[problem.add_equation(eqn) for eqn in eqns]
+
+		# d/dt equations
+		problem.add_equation('dt(x) - xt = 0')
+		problem.add_equation('dt(y) - yt = 0')
+		problem.add_equation('dt(z) - zt = 0')
+		problem.add_equation('dt(u) - ut = 0')
+		problem.add_equation('dt(v) - vt = 0')
+		problem.add_equation('dt(w) - wt = 0')
+
+		# build solver
+		solver = problem.build_solver(de.timesteppers.RK443)
+
+		# set ics
+		ic_path = get_ic_path(PR, RA)
+		f = h5.File(ic_path, 'r')
+		x0 = np.array(f['x'])
+		y0 = np.array(f['y'])
+		z0 = np.array(f['z'])
+		f.close()
+
+		x, y, z = solver.state['x'], solver.state['y'], solver.state['z']
+		x['g'] = np.full(NS, fill_value=x0)
+		y['g'] = np.full(NS, fill_value=y0)
+		z['g'] = np.full(NS, fill_value=z0)	
+
+		# set up analysis
+		analysis = solver.evaluator.add_file_handler(filename='analysis', iter=1, max_size=2**(64))
+		analysis.add_system(solver.state, layout='g')
+
+		# run for 5 units of time
+		stop_it = 5 // dt + 1
+		solver.stop_iteration = stop_it
+
+		while solver.ok:
+			solver.step(dt)
 
 	def simulate(self, pr0=20, mu=30, dt=1/2048, stop_it=1000, rule='no_update', nudge='x', ts=de.timesteppers.RK443,
-				 outfile='analysis', print_every=10, **kwargs):
+				 outfile='analysis', print_every=10, calc_thold=False, **kwargs):
 		"""
 			pr0   : initial value for tilde Prandtl
 			mu    : nudging parameter
@@ -140,13 +251,25 @@ class LPE:
 		"""
 		self.pr0 = pr0
 		self.mu = mu
+		self.dt = dt
 		self.rule = rule
+		self.nudge = nudge
+		self.ts = ts
+		self.calc_thold = calc_thold
 
 		domain = self.domain
 		problem = self.problem
 
+		# initialize lorenz system
+		PR, RA, B, NS = self.PR, self.RA, self.B, self.NS
+		ic_path = get_ic_path(PR, RA)
+		self.ic_path = ic_path
+		if not os.path.exists(ic_path):
+			print('Making initial data.')
+			make_initial_data(PR, RA, B, NS, dt)
+
 		# get pr update function
-		F, ruleargs = self.setup_rule(rule, **kwargs)
+		F, ruleargs = self.setup_rule(**kwargs)
 		if not F: # invalid rule
 			print('No rule exists corresponding to the name ', rule, '. Exiting.')
 			return
@@ -164,7 +287,7 @@ class LPE:
 		problem.add_equation('dt(z) = -B*z + x*y - B*(RA+PR)')
 
 		# nudged lorenz equations
-		eqns = self.nudged_eqns(nudge)
+		eqns = nudged_eqns(nudge)
 		[problem.add_equation(eqn) for eqn in eqns]
 
 		# d/dt equations
@@ -183,15 +306,7 @@ class LPE:
 		solver = problem.build_solver(ts)
 		self.solver = solver
 
-		# initialize lorenz system
-		PR, RA, B, NS = self.PR, self.RA, self.B, self.NS
-		if not initial_data_exists(PR, RA):
-			print('Making initial data.')
-			make_initial_data(PR, RA, B, NS, dt)
-
-		fname = 'PR_' + str(PR) + '_RA_' + str(RA)
-		path = 'initial_data/' + fname  + '.h5'
-		f = h5.File(path, 'r')
+		f = h5.File(ic_path, 'r')
 		x0 = np.array(f['x'])
 		y0 = np.array(f['y'])
 		z0 = np.array(f['z'])
@@ -214,7 +329,7 @@ class LPE:
 			solver.step(dt)
 
 			if F != 1:
-				self.update_ruleargs(rule, ruleargs)
+				self.update_ruleargs(ruleargs)
 
 			it = solver.iteration
 			percent = (it/stop_it)*100

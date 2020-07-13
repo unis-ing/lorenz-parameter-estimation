@@ -6,6 +6,7 @@ import dedalus.public as de
 import h5py as h5
 import numpy as np
 import os.path
+from shutil import copyfile
 
 de.logging_setup.rootlogger.setLevel('ERROR')
 
@@ -26,12 +27,28 @@ def val(state):
 	return state['g'][0]
 
 def log10mean(arr):
-
 	return np.log10(np.mean(arr))
 
-def initial_data_exists(PR, RA):
+def nudged_eqns(nudge):
+	"""
+	return nudged lorenz equations.
+	"""
+	eqns = ['dt(u) = -pr*u + pr*v', 
+			'dt(v) + v = -pr*u - u*w', 
+			'dt(w) = -B*w + u*v - B*(RA+pr)']
+	if 'x' in nudge:
+		eqns[0] += '- mu*(u-x)'
+	if 'y' in nudge:
+		eqns[1] += '- mu*(v-y)'
+	if 'z' in nudge:
+		eqns[2] += '- mu*(w-z)'
+	return eqns
 
-	return os.path.exists('initial_data/PR_' + str(PR) + '_RA_' + str(RA) + '.h5')
+def get_ic_path(PR, RA):
+	return 'initial_data/PR_' + str(PR) + '_RA_' + str(RA) + '.h5'
+
+def get_th_path(PR, RA, mu):
+	return 'thresholds/PR_' + str(PR) + '_RA_' + str(RA) + '_mu_' + str(mu) + '.h5'
 
 def make_initial_data(PR, RA, B, NS, dt):
 	"""
