@@ -8,7 +8,8 @@ Code, data, and etc. produced in an ongoing research project under Professor Vin
 * [`lorenz_pr_estimation.py`](https://github.com/unis-ing/lorenz-parameter-estimation/blob/master/lorenz_pr_estimation.py) :  main `LPE` class.
 * [`rules.py`](https://github.com/unis-ing/lorenz-parameter-estimation/blob/master/rules.py) : implements different estimates for the Prandtl number.
 * [`lpe_helpers.py`](https://github.com/unis-ing/lorenz-parameter-estimation/blob/master/lpe_helpers.py) : helpers for the `simulate` method.
-* [`initial_data/`](https://github.com/unis-ing/lorenz-parameter-estimation/tree/master/initial_data) : initial conditions to be used in solving the Lorenz equations. Each file corresponds to a Prandtl and Rayleigh number.
+* [`initial_data/`](https://github.com/unis-ing/lorenz-parameter-estimation/tree/master/initial_data) : initial conditions to be used in solving the Lorenz equations. Each file corresponds to a Prandtl number and Rayleigh number.
+* [`thresholds/`](https://github.com/unis-ing/lorenz-parameter-estimation/tree/master/thresholds) : reasonable initial error thresholds for `rule1_c*`. Each file corresponds to a Prandtl number, Rayleigh number, and nudging parameter.
 
 ## Background
 A write-up including the mathematical background, problem statement, and numerical/theoretical results is in progress. ✌️
