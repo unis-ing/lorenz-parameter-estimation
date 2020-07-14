@@ -111,7 +111,7 @@ class LPE:
 
 	def calculate_thresholds_rule1(self):
 		PR, RA, pr0, mu = self.PR, self.RA, self.pr0, self.mu
-		B, NS, nudge = self.B, self.NS, self.nudge
+		B, NS, dt, nudge = self.B, self.NS, self.dt, self.nudge
 
 		th_path = get_th_path(PR, RA, mu)
 
@@ -123,7 +123,7 @@ class LPE:
 
 		else:
 			print('Solving nudged equations to calculate thresholds.')
-			make_threshold_data(PR, RA, pr0, mu, B, NS, nudge)
+			make_threshold_data(PR, RA, pr0, mu, B, NS, dt, nudge)
 
 			f  = h5.File(analysis_temp_path, 'r')
 			t  = f['tasks']
