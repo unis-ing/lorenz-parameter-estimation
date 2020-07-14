@@ -1,13 +1,9 @@
-import numpy as np
-import dedalus.public as de
 from dedalus.core.operators import GeneralFunction
-import h5py as h5
 from lpe_helpers import *
 from rules import *
 import time
 
 de.logging_setup.rootlogger.setLevel('ERROR')
-
 
 class LPE:
 	def __init__(self, PR=10, RA=28, B=8/3, NS=2):
@@ -25,15 +21,16 @@ class LPE:
 
 		basis = de.Chebyshev('s', NS, interval=(0,1), dealias=3/2)
 		domain = de.Domain([basis], grid_dtype=np.float64)
-
-		problem = de.IVP(domain, variables=['x', 'y', 'z', 'u', 'v', 'w', 'xt', 'yt', 'zt', 'ut', 'vt', 'wt'])
+		problem = de.IVP(domain, variables=['x', 'y', 'z',
+											'xt', 'yt', 'zt',
+											'u', 'v', 'w',
+											'ut', 'vt', 'wt'])
 		problem.parameters['PR'] = PR
 		problem.parameters['RA'] = RA
 		problem.parameters['B'] = B
 
-		self.basis = basis
-		self.domain = domain
 		self.problem = problem
+		self.domain = domain
 
 	def setup_rule(self, **kwargs):
 		"""
@@ -49,11 +46,16 @@ class LPE:
 		rn = rule[4] # rule number
 		cn = rule[-1] # condition number
 
-		if rn == '0' or rn == '1':
-			self.da = kwargs['da']
-			self.db = kwargs['db']
+		self.da = kwargs['da']
+		self.db = kwargs['db']
 
-			if rn == '1' and self.calc_thold: # option to calc tholds
+		if rn == '1':
+			self.P = 0
+			self.Pc = kwargs['Pc']
+			if cn == '2':
+				self.M = kwargs['M']
+
+			if self.calc_thold: # option to calc tholds
 				theta, rho = self.calculate_thresholds_rule1()
 				self.theta = theta
 				self.rho = rho
@@ -61,15 +63,9 @@ class LPE:
 				self.theta = kwargs['theta']
 				self.rho = kwargs['rho']
 
-			# initialize empty lists for storage
-			self.thetalist = []
-			self.rholist = []
-
-			if rn == '1':
-				self.P = 0
-				self.Pc = kwargs['Pc']
-				if cn == '2':
-					self.M = kwargs['M']
+		# initialize empty lists for storage
+		self.thetalist = []
+		self.rholist = []
 
 		# return rule args
 		pr0 = self.pr0
@@ -97,39 +93,39 @@ class LPE:
 
 	def update_ruleargs(self, ruleargs):
 		"""
-		updates rulesargs at each iteration. also stores updated rule args.
+		updates rulesargs at each iteration of main loop. also stores updated rule args.
 		"""
 		rule = self.rule
-		if rule == 'rule0_c1' or rule == 'rule1_c1' or rule == 'rule1_c2':
-			self.thetalist.append(self.theta)
-			self.rholist.append(self.rho)
+		self.thetalist.append(self.theta)
+		self.rholist.append(self.rho)
 
-			if rule == 'rule1_c1' or rule == 'rule1_c2':
-				it = self.solver.iteration
-				prs = ruleargs[1]
-				prev_pr = prs[it-1]
-				curr_pr = prs[it]
-				if curr_pr != prev_pr:
-					self.P = 0
-				else:
-					self.P += 1
+		if rule[4] == '1':
+			it = self.solver.iteration
+			prs = ruleargs[1]
+			prev_pr = prs[it-1]
+			curr_pr = prs[it]
+			if curr_pr != prev_pr:
+				self.P = 0
+			else:
+				self.P += 1
 
 	def calculate_thresholds_rule1(self):
-		pr0 = self.pr0
-		mu = self.mu
-		th_path = get_th_path(self.PR, self.RA, self.mu)
+		PR, RA, pr0, mu = self.PR, self.RA, self.pr0, self.mu
+		B, NS, nudge = self.B, self.NS, self.nudge
+
+		th_path = get_th_path(PR, RA, mu)
 
 		if os.path.exists(th_path):
 			f = h5.File(th_path, 'r')
 			theta = np.array(f['theta'])[0]
 			rho = np.array(f['rho'])[0]
 			f.close()
+
 		else:
 			print('Solving nudged equations to calculate thresholds.')
-			self.make_thresholds_data()
-			p = 'analysis/analysis_s1/analysis_s1_p0.h5'
+			make_threshold_data(PR, RA, pr0, mu, B, NS, nudge)
 
-			f  = h5.File(p, 'r')
+			f  = h5.File(analysis_temp_path, 'r')
 			t  = f['tasks']
 			x  = np.array(t['x'])[:,0]
 			u  = np.array(t['u'])[:,0]
@@ -143,22 +139,23 @@ class LPE:
 
 			guess = rule1(pr=pr0, mu=mu, x=x, u=u, v=v)
 			guesserr = abs(self.PR - guess)
-			# only consider errors past 1,000th index
 			i = np.where(guesserr == min(guesserr))
-			minuerr = uerr[i]
-			minuterr = uterr[i]
+			min_pos_err = uerr[i]
+			min_vel_err = uterr[i]
 
-			floorlog = np.floor(np.log10(minuerr))
-			roundreciprocal = np.ceil(minuerr * 10**(-floorlog))
+			# calculate theta
+			floorlog = np.floor(np.log10(min_pos_err))
+			roundreciprocal = np.ceil(min_pos_err * 10**(-floorlog))
 			theta = roundreciprocal * 10**floorlog
 			theta = theta[0]
 
-			floorlog = np.floor(np.log10(minuterr))
-			roundreciprocal = np.ceil(minuterr * 10**(-floorlog))
+			# calculate rho
+			floorlog = np.floor(np.log10(min_vel_err))
+			roundreciprocal = np.ceil(min_vel_err * 10**(-floorlog))
 			rho = roundreciprocal * 10**floorlog
 			rho = rho[0]
 
-			# write to file
+			# write thresholds to file
 			f = h5.File(th_path, 'a')
 			f.create_dataset('theta', data=np.array([theta]))
 			f.create_dataset('rho', data=np.array([rho]))
@@ -166,95 +163,19 @@ class LPE:
 
 		return theta, rho
 
-	def make_thresholds_data(self):
-		"""
-		Make data for calculating thresholds by solving nudged Lorenz equations for 5 units of time.
-		"""
-		PR = self.PR
-		RA = self.RA
-		B = self.B
-		NS = self.NS
-		pr0 = self.pr0
-		mu = self.mu
-		dt = self.dt
-		nudge = self.nudge
-		ts = self.ts
-
-		basis = de.Chebyshev('s', NS, interval=(0,1), dealias=3/2)
-		domain = de.Domain([basis], grid_dtype=np.float64)
-
-		problem = de.IVP(domain, variables=['x', 'y', 'z', 'u', 'v', 'w', 'xt', 'yt', 'zt', 'ut', 'vt', 'wt'])
-		problem.parameters['PR'] = PR
-		problem.parameters['RA'] = RA
-		problem.parameters['B'] = B
-		problem.parameters['mu'] = mu
-		problem.parameters['pr'] = pr0
-
-		# lorenz equations
-		problem.add_equation('dt(x) = -PR*x + PR*y')
-		problem.add_equation('dt(y) + y = -PR*x - x*z')
-		problem.add_equation('dt(z) = -B*z + x*y - B*(RA+PR)')
-
-		# nudged lorenz equations
-		eqns = nudged_eqns(nudge)
-		[problem.add_equation(eqn) for eqn in eqns]
-
-		# d/dt equations
-		problem.add_equation('dt(x) - xt = 0')
-		problem.add_equation('dt(y) - yt = 0')
-		problem.add_equation('dt(z) - zt = 0')
-		problem.add_equation('dt(u) - ut = 0')
-		problem.add_equation('dt(v) - vt = 0')
-		problem.add_equation('dt(w) - wt = 0')
-
-		# build solver
-		solver = problem.build_solver(de.timesteppers.RK443)
-
-		# set ics
-		ic_path = get_ic_path(PR, RA)
-		f = h5.File(ic_path, 'r')
-		x0 = np.array(f['x'])
-		y0 = np.array(f['y'])
-		z0 = np.array(f['z'])
-		f.close()
-
-		x, y, z = solver.state['x'], solver.state['y'], solver.state['z']
-		x['g'] = np.full(NS, fill_value=x0)
-		y['g'] = np.full(NS, fill_value=y0)
-		z['g'] = np.full(NS, fill_value=z0)	
-
-		# set up analysis
-		analysis = solver.evaluator.add_file_handler(filename='analysis', iter=1, max_size=2**(64))
-		analysis.add_system(solver.state, layout='g')
-
-		# run for 5 units of time
-		stop_it = 5 // dt + 1
-		solver.stop_iteration = stop_it
-
-		while solver.ok:
-			solver.step(dt)
-
-	def simulate(self, pr0=20, mu=30, dt=1/2048, stop_it=1000, rule='no_update', nudge='x', ts=de.timesteppers.RK443,
-				 outfile='analysis', print_every=10, calc_thold=False, **kwargs):
+	def simulate(self, pr0=20, mu=30, dt=1/2048, stop_it=1000, rule='no_update', 
+				 nudge='x', print_every=10, calc_thold=False, **kwargs):
 		"""
 			pr0   : initial value for tilde Prandtl
 			mu    : nudging parameter
 			dt    : time-step
 			stop_it : number of iterations
-			rule  : update rule for tilde Prandtl
-			ts    : Dedalus time stepping scheme
+			rule  : update rule for tilde Prandtl\
 			nudge : (str) array or single string representing nudged coordinate(s)
-			ic    : (str) file path to h5 file containing initial conditions
-			outfile : (str) file name for analysis to be saved under
 			print_every : print progress message every x% to completion
 			kwargs: arguments for rule
 		"""
-		self.pr0 = pr0
-		self.mu = mu
-		self.dt = dt
-		self.rule = rule
-		self.nudge = nudge
-		self.ts = ts
+		self.pr0, self.mu, self.dt, self.rule, self.nudge = pr0, mu, dt, rule, nudge
 		self.calc_thold = calc_thold
 
 		domain = self.domain
@@ -263,10 +184,10 @@ class LPE:
 		# initialize lorenz system
 		PR, RA, B, NS = self.PR, self.RA, self.B, self.NS
 		ic_path = get_ic_path(PR, RA)
-		self.ic_path = ic_path
 		if not os.path.exists(ic_path):
 			print('Making initial data.')
-			make_initial_data(PR, RA, B, NS, dt)
+			make_initial_data(PR=PR, RA=RA, B=B, NS=NS, dt=dt)
+		self.ic_path = ic_path
 
 		# get pr update function
 		F, ruleargs = self.setup_rule(**kwargs)
@@ -274,36 +195,31 @@ class LPE:
 			print('No rule exists corresponding to the name ', rule, '. Exiting.')
 			return
 
-		# add pr to problem namespace
-		if F == 1: # no update
+		# add mu, pr to problem namespace
+		problem.parameters['mu'] = mu
+		if rule == 'no_update':
 			problem.parameters['pr'] = pr0
 		else:
-			problem.parameters['pr'] = de.operators.GeneralFunction(domain, layout='g', func=F, args=[])
-		problem.parameters['mu'] = mu
+			problem.parameters['pr'] = de.operators.GeneralFunction(domain, layout='g', 
+																	func=F, args=[])
 
-		# lorenz equations
-		problem.add_equation('dt(x) = -PR*x + PR*y')
-		problem.add_equation('dt(y) + y = -PR*x - x*z')
-		problem.add_equation('dt(z) = -B*z + x*y - B*(RA+PR)')
+		# add lorenz equations
+		[problem.add_equation(eqn) for eqn in lorenz_equations]
 
-		# nudged lorenz equations
-		eqns = nudged_eqns(nudge)
-		[problem.add_equation(eqn) for eqn in eqns]
+		# add nudged lorenz equations
+		[problem.add_equation(eqn) for eqn in nudged_lorenz_equations(nudge)]
 
-		# d/dt equations
-		problem.add_equation('dt(x) - xt = 0')
-		problem.add_equation('dt(y) - yt = 0')
-		problem.add_equation('dt(z) - zt = 0')
-		problem.add_equation('dt(u) - ut = 0')
-		problem.add_equation('dt(v) - vt = 0')
-		problem.add_equation('dt(w) - wt = 0')
+		# add dt equations
+		[problem.add_equation(eqn) for eqn in xt_equations]
+		[problem.add_equation(eqn) for eqn in ut_equations]
 
-		if F != 1: # for some reason args must be set AFTER equations are added
+		if rule != 'no_update': 
+			# for some reason args must be set AFTER equations are added
 			problem.parameters['pr'].args = ruleargs
 			problem.parameters['pr'].original_args = ruleargs
 
 		# build solver
-		solver = problem.build_solver(ts)
+		solver = problem.build_solver(scheme)
 		self.solver = solver
 
 		f = h5.File(ic_path, 'r')
@@ -318,7 +234,8 @@ class LPE:
 		z['g'] = np.full(NS, fill_value=z0)
 
 		# set up analysis
-		analysis = solver.evaluator.add_file_handler(filename=outfile, iter=1, max_size=2**(64))
+		analysis = solver.evaluator.add_file_handler(filename=analysis_name, iter=1, 
+													 max_size=2**(64))
 		analysis.add_system(solver.state, layout='g')
 
 		solver.stop_sim_time = np.inf
@@ -328,7 +245,7 @@ class LPE:
 		while solver.ok:
 			solver.step(dt)
 
-			if F != 1:
+			if rule != 'no_update':
 				self.update_ruleargs(ruleargs)
 
 			it = solver.iteration
@@ -337,7 +254,7 @@ class LPE:
 			# print progress msg
 			if percent % print_every == 0:
 				progress_msg = '{0:.0f}% complete. {1:.2f} sec elapsed.'.format(percent, time.time()-start)
-				if F != 1:
+				if rule != 'no_update':
 					prs = ruleargs[1]
 					curr_pr = prs[it]
 					pr_err = abs(self.PR - curr_pr)
@@ -347,12 +264,45 @@ class LPE:
 		print('Total runtime: {:.4f} sec.'.format(time.time()-start))
 
 		# write pr to .h5
-		if F != 1:
-			path = '/'.join([outfile, outfile + '_s1', outfile + '_s1_p0.h5'])
-			f = h5.File(path, 'a')
-
+		if rule != 'no_update':
+			f = h5.File(analysis_temp_path, 'a')
 			prs = list(prs.values())[1:]
 			f.create_dataset('tasks/pr', data=prs)
 			f.create_dataset('tasks/theta', data=self.thetalist)
 			f.create_dataset('tasks/rho', data=self.rholist)
 			f.close()
+
+	def save_data(self):
+		src = analysis_temp_path
+		dst = self.get_save_path()
+
+		if os.path.isfile(dst):
+			ans = input('File already exists. Overwrite? [y/n]')
+			if ans == 'y':		        
+				copyfile(src, dst)
+				print('Saved to ', dst)
+
+	def get_save_path(self):
+		rule = self.rule
+		PR, RA, pr0, mu, dt = self.PR, self.RA, self.pr0, self.mu, self.dt
+		theta, rho = self.theta, self.rho
+
+		name = '_'.join(map(str, [rule, 'PR', PR, 'RA', RA, 'pr0', pr0, 'mu', mu, 'dt', dt]))
+		if rule != 'no_update':
+			da, db = self.da, self.db
+			name += '_' + '_'.join(map(str, ['da', da, 'db', db, 'th', theta, 'rh', rho]))
+		if rule[4] == '1':
+			Pc = self.Pc
+			name += '_Pc_' + str(Pc)
+		if rule == 'rule1_c2':
+		    name += '_M_' + str(M)
+		name = name.replace('.', '_')
+
+		# set folder
+		if rule == 'no_update':
+		    folder = test_data_folder
+		else:
+		    folder = result_data_folder
+		dst = folder + name + '.h5'
+
+		return dst
