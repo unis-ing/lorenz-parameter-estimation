@@ -1,5 +1,5 @@
 from dedalus.core.operators import GeneralFunction
-from lpe_helpers import *
+from helpers import *
 from rules import *
 import time
 
@@ -43,6 +43,8 @@ class LPE:
 			P     : P in writeup
 		"""
 		rule = self.rule
+		if rule == 'no_update': return 1, 1
+
 		rn = rule[4] # rule number
 		cn = rule[-1] # condition number
 
@@ -84,9 +86,6 @@ class LPE:
 				ruleargs = [self, {0 : pr0}, np.full(1 + self.Pc, np.inf)]
 				self.ruleargs = ruleargs
 				return rule1_c2, ruleargs
-
-		elif rule == 'no_update':
-			return 1, 1
 
 		else:
 			return 0, 0
@@ -140,26 +139,27 @@ class LPE:
 			guess = rule1(pr=pr0, mu=mu, x=x, u=u, v=v)
 			guesserr = abs(self.PR - guess)
 			i = np.where(guesserr == min(guesserr))
-			min_pos_err = uerr[i]
-			min_vel_err = uterr[i]
+			min_pos_err = uerr[i].item()
+			min_vel_err = uterr[i].item()
 
 			# calculate theta
 			floorlog = np.floor(np.log10(min_pos_err))
 			roundreciprocal = np.ceil(min_pos_err * 10**(-floorlog))
-			theta = roundreciprocal * 10**floorlog
-			theta = theta[0]
+			theta = roundreciprocal * 10**int(floorlog)
 
 			# calculate rho
 			floorlog = np.floor(np.log10(min_vel_err))
 			roundreciprocal = np.ceil(min_vel_err * 10**(-floorlog))
-			rho = roundreciprocal * 10**floorlog
-			rho = rho[0]
+			rho = roundreciprocal * 10**int(floorlog)
 
 			# write thresholds to file
 			f = h5.File(th_path, 'a')
 			f.create_dataset('theta', data=np.array([theta]))
 			f.create_dataset('rho', data=np.array([rho]))
 			f.close()
+
+		# print(theta)
+		# print(rho)
 
 		return theta, rho
 
@@ -278,24 +278,28 @@ class LPE:
 
 		if os.path.isfile(dst):
 			ans = input('File already exists. Overwrite? [y/n]')
-			if ans == 'y':		        
-				copyfile(src, dst)
-				print('Saved to ', dst)
+			if ans == 'n':
+				print('Data not saved.')
+				return
+
+		copyfile(src, dst)
+		print('Saved to', dst)
 
 	def get_save_path(self):
 		rule = self.rule
 		PR, RA, pr0, mu, dt = self.PR, self.RA, self.pr0, self.mu, self.dt
-		theta, rho = self.theta, self.rho
 
 		name = '_'.join(map(str, [rule, 'PR', PR, 'RA', RA, 'pr0', pr0, 'mu', mu, 'dt', dt]))
 		if rule != 'no_update':
 			da, db = self.da, self.db
+			theta, rho = self.thetalist[0], self.rholist[0]
 			name += '_' + '_'.join(map(str, ['da', da, 'db', db, 'th', theta, 'rh', rho]))
 		if rule[4] == '1':
 			Pc = self.Pc
 			name += '_Pc_' + str(Pc)
 		if rule == 'rule1_c2':
-		    name += '_M_' + str(M)
+			M = self.M
+			name += '_M_' + str(M)
 		name = name.replace('.', '_')
 
 		# set folder

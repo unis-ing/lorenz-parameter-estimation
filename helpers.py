@@ -99,10 +99,10 @@ def make_initial_data(PR, RA, B, NS, dt):
 	f.create_dataset('z', data=np.array([val(z)]))
 	f.close()
 
-def make_threshold_data(PR, RA, pr, mu, B, NS, nudge):
+def make_threshold_data(PR, RA, pr, mu, B, NS, dt, nudge):
 	"""
 	Make data for calculating thresholds by solving nudged Lorenz equations with constant
-	pr for 5 units of time. Assumes ic data exists.
+	pr for 10 units of time. Assumes ic data exists.
 		"""	
 	basis = de.Chebyshev('s', NS, interval=(0,1), dealias=3/2)
 	domain = de.Domain([basis], grid_dtype=np.float64)
@@ -146,8 +146,24 @@ def make_threshold_data(PR, RA, pr, mu, B, NS, nudge):
 	analysis.add_system(solver.state, layout='g')
 
 	# run for 5 units of time
-	stop_it = 5 // dt + 1
+	stop_it = 10 // dt + 1
 	solver.stop_iteration = stop_it
 
 	while solver.ok:
 		solver.step(dt)
+
+"""
+ for parameter tuning
+"""
+
+def running_mean(x, N): # https://stackoverflow.com/a/27681394
+    cumsum = np.cumsum(np.insert(x, 0, 0)) 
+    return (cumsum[N:] - cumsum[:-N]) / float(N)
+
+def M_data(A, N):
+	"""
+		Use A = uerr and N = Pc in order to determine M.
+	"""
+	rm = running_mean(A, N)
+	logrm = np.log10(rm)
+	return logrm[1:] - logrm[:-1]

@@ -4,14 +4,14 @@ functions implementing different update rules for the LPE class.
 rule functions are named as rule[rule #]_c[condition #]
 
 """
-from lpe_helpers import *
+from helpers import *
 import numpy as np
 
 def rule0(pr, mu, x, y, u, v):
 	"""
 		Assumes knowledge of x, y.
 	"""
-	return (pr*u - pr*v + mu*(u-x)) / (x-y)
+	return (pr*(u-v) + mu*(u-x)) / (x-y)
 
 def rule0_c1(*args):
 	lpe = args[0]
@@ -48,7 +48,7 @@ def rule1(pr, mu, x, u, v):
 	"""
 		Assumes knowledge of x.
 	"""
-	return (pr*u - pr*v + mu*(u-x)) / (x-v)
+	return (pr*(u-v) + mu*(u-x)) / (x-v)
 
 def rule1_c1(*args):
 	lpe = args[0]
@@ -65,11 +65,10 @@ def rule1_c1(*args):
 	pr = prs[it-1]
 	newpr = pr # initialize next pr as current pr
 
-	c1 = lpe.P >= lpe.Pc
-	c2 = uerr <= lpe.theta
-	c3 = uterr <= lpe.rho
-	# c4 = it >= 5000
-	c4 = True
+	c1 = ((it >= 4000) and (lpe.P >= lpe.Pc)) or (it < 4000)
+	c2 = lpe.P >= lpe.Pc
+	c3 = uerr <= lpe.theta
+	c4 = uterr <= lpe.rho
 	c5 = (uerr > 0) and (uterr > 0)
 
 	if c1 and c2 and c3 and c4 and c5:
@@ -126,8 +125,9 @@ def rule1_c2(*args):
 		m2 = log10mean(uerrs[1:])
 
 		c5 = m2 - m1 >= lpe.M
-		# threshold was not increased in the last X number of iterations
+		# check that threshold was not increased in the last X number of iterations
 		c6 = np.any(np.diff(lpe.thetalist[-lpe.Pc // 20:]) > 0)
+
 		if c5 and not c6:
 			lpe.theta /= lpe.da
 			lpe.rho /= lpe.db
