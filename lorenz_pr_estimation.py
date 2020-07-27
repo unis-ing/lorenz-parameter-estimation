@@ -48,22 +48,24 @@ class LPE:
 		rn = rule[4] # rule number
 		cn = rule[-1] # condition number
 
+		# these args apply to all rules
 		self.da = kwargs['da']
 		self.db = kwargs['db']
+
+		if not self.calc_thold:
+			self.theta = kwargs['theta']
+			self.rho = kwargs['rho']
+		else:
+			if rn == '1': # option to calc tholds. ONLY SETUP FOR rule1
+				theta, rho = self.calculate_thresholds_rule1()
+				self.theta = theta
+				self.rho = rho
 
 		if rn == '1':
 			self.P = 0
 			self.Pc = kwargs['Pc']
 			if cn == '2':
 				self.M = kwargs['M']
-
-			if self.calc_thold: # option to calc tholds
-				theta, rho = self.calculate_thresholds_rule1()
-				self.theta = theta
-				self.rho = rho
-			else:
-				self.theta = kwargs['theta']
-				self.rho = kwargs['rho']
 
 		# initialize empty lists for storage
 		self.thetalist = []
@@ -77,7 +79,7 @@ class LPE:
 			return rule0_c1, ruleargs
 
 		elif rn == '1':
-			if cn == '1':
+			if cn == '0' or cn == '1':
 				ruleargs = [self, {0 : pr0}] # dict to track pr
 				self.ruleargs = ruleargs
 				return rule1_c1, ruleargs
@@ -98,7 +100,8 @@ class LPE:
 		self.thetalist.append(self.theta)
 		self.rholist.append(self.rho)
 
-		if rule[4] == '1':
+		rn = rule[4]
+		if rn == '1':
 			it = self.solver.iteration
 			prs = ruleargs[1]
 			prev_pr = prs[it-1]
