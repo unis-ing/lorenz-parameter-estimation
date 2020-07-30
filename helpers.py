@@ -63,11 +63,12 @@ def get_th_path(PR, RA, mu):
 	th_name = '_'.join(map(str, ['PR', PR, 'RA', RA, 'mu', mu]))
 	return threshold_folder + th_name + '.h5'
 
-def make_initial_data(PR, RA, B, NS, dt):
+def make_initial_data(PR, RA, B, NS):
 	"""
 	Make initial data by solving Lorenz equations for 5 units of time and write to
 	the initial_data folder.
 	"""
+	dt = 0.001
 	basis = de.Chebyshev('s', NS, interval=(0,1), dealias=3/2)
 	domain = de.Domain([basis], grid_dtype=np.float64)
 

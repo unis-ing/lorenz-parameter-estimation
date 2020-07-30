@@ -79,7 +79,11 @@ class LPE:
 			return rule0_c1, ruleargs
 
 		elif rn == '1':
-			if cn == '0' or cn == '1':
+			if cn == '0':
+				ruleargs = [self, {0 : pr0}] # dict to track pr
+				self.ruleargs = ruleargs
+				return rule1_c0, ruleargs
+			elif cn == '1':
 				ruleargs = [self, {0 : pr0}] # dict to track pr
 				self.ruleargs = ruleargs
 				return rule1_c1, ruleargs
@@ -189,7 +193,7 @@ class LPE:
 		ic_path = get_ic_path(PR, RA)
 		if not os.path.exists(ic_path):
 			print('Making initial data.')
-			make_initial_data(PR=PR, RA=RA, B=B, NS=NS, dt=dt)
+			make_initial_data(PR=PR, RA=RA, B=B, NS=NS)
 		self.ic_path = ic_path
 
 		# get pr update function
