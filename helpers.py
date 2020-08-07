@@ -2,12 +2,12 @@
 helper functions for the LPE class.
 
 """
-import warnings 
 import dedalus.public as de
 import h5py as h5
 import numpy as np
 import os.path
 from shutil import copyfile
+import warnings 
 
 de.logging_setup.rootlogger.setLevel('ERROR')
 
