@@ -2,6 +2,7 @@
 helper functions for the LPE class.
 
 """
+import warnings 
 import dedalus.public as de
 import h5py as h5
 import numpy as np
@@ -9,6 +10,10 @@ import os.path
 from shutil import copyfile
 
 de.logging_setup.rootlogger.setLevel('ERROR')
+
+# suppress warning from a deprecated h5py function being used in dedalus source code
+warnings.filterwarnings("ignore", category=h5.h5py_warnings.H5pyDeprecationWarning)
+
 scheme = de.timesteppers.RK443
 
 result_data_folder = 'result_data/'

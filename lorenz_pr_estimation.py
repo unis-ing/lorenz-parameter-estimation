@@ -3,8 +3,6 @@ from helpers import *
 from rules import *
 import time
 
-de.logging_setup.rootlogger.setLevel('ERROR')
-
 class LPE:
 	def __init__(self, PR=10, RA=28, B=8/3, NS=2):
 		"""
@@ -149,12 +147,12 @@ class LPE:
 			min_pos_err = uerr[i].item()
 			min_vel_err = uterr[i].item()
 
-			# calculate theta
+			# set theta to rounded uerr
 			floorlog = np.floor(np.log10(min_pos_err))
 			roundreciprocal = np.ceil(min_pos_err * 10**(-floorlog))
 			theta = roundreciprocal * 10**int(floorlog)
 
-			# calculate rho
+			# set rho to rounded uterr
 			floorlog = np.floor(np.log10(min_vel_err))
 			roundreciprocal = np.ceil(min_vel_err * 10**(-floorlog))
 			rho = roundreciprocal * 10**int(floorlog)
