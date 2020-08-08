@@ -14,9 +14,9 @@ python3 example.py
 * [`rules.py`](https://github.com/unis-ing/lorenz-parameter-estimation/blob/master/rules.py) : implements different estimates for the Prandtl number.
 * [`helpers.py`](https://github.com/unis-ing/lorenz-parameter-estimation/blob/master/helpers.py) : helpers for the `simulate` method.
 * [`example.py`](https://github.com/unis-ing/lorenz-parameter-estimation/blob/master/example.py) : sample script using `LPE` to perform parameter estimation in the Lorenz system.
-* [`initial_data/`](https://github.com/unis-ing/lorenz-parameter-estimation/tree/master/initial_data) : initial conditions to be used in solving the Lorenz equations. Each file corresponds to a Prandtl number and Rayleigh number.
-* [`result_data/`](https://github.com/unis-ing/lorenz-parameter-estimation/tree/master/result_data) : simulation data used in the "Algorithms" section of the background paper (files larger than 1GB omitted)
-* [`thresholds/`](https://github.com/unis-ing/lorenz-parameter-estimation/tree/master/thresholds) : reasonable initial error thresholds for `rule1_c*`. Each file corresponds to a Prandtl number, Rayleigh number, and nudging parameter.
+* [`initial_data/`](https://github.com/unis-ing/lorenz-parameter-estimation/tree/master/initial_data) : initial conditions to be used in solving the Lorenz equations (see Appendix A.2.3 of the write-up).
+* [`result_data/`](https://github.com/unis-ing/lorenz-parameter-estimation/tree/master/result_data) : simulation data used in the "Algorithms" section of the write-up (files larger than 1GB omitted).
+* [`thresholds/`](https://github.com/unis-ing/lorenz-parameter-estimation/tree/master/thresholds) : values obtained from parameter tuning the `a` and `b` arguments of `rule1_c1` (see Appendix A.2.4 of the write-up).
 
 ## Write-up
 A first draft of the project write-up is available [here](https://github.com/unis-ing/lorenz-parameter-estimation/blob/master/writeup.pdf) 🥳. 
