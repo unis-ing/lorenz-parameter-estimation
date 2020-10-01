@@ -295,19 +295,19 @@ class LPE:
 		PR, RA, pr0, mu, dt = self.PR, self.RA, self.pr0, self.mu, self.dt
 
 		parameters = [['PR', PR], ['RA', RA], ['pr0', pr0], ['mu', mu], ['dt', dt]]
-		name = '_'.join('{0}_{1:f}'.format(*p).rstrip('0').rstrip('.') for p in parameters)
+		name = '_'.join('{}_{:f}'.format(*p).rstrip('0').rstrip('.') for p in parameters)
 		if rule != 'no_update':
 			da, db = self.da, self.db
 			theta, rho = self.thetalist[0], self.rholist[0]
-			parameters = ['da', da, 'db', db, 'th', theta, 'rh', rho]
-			name += '_' + '_'.join('{0}_{1:f}'.format(*p).rstrip('0').rstrip('.') for p in parameters)
+			parameters = [['da', da], ['db', db], ['th', theta], ['rh', rho]]
+			name += '_' + '_'.join('{}_{:f}'.format(*p).rstrip('0').rstrip('.') for p in parameters)
 		if rule[4] == '1':
 			Pc = self.Pc
 			name += '_Pc_' + str(Pc)
 		if rule == 'rule1_c2':
 			M = self.M
 			name += '_M_' + '{:f}'.format(M).rstrip('0').rstrip('.')
-		name = name.replace('.', '_')
+		name = rule + '_' + name.replace('.', '_')
 
 		# set folder
 		if rule == 'no_update':
