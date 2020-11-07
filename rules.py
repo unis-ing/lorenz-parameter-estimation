@@ -5,8 +5,8 @@ rule functions are named as rule[rule #]_c[condition #]
 
 """
 from helpers import *
-import numpy as np
 
+# ------------------------------ rule0 ------------------------------------------
 def rule0(pr, mu, x, y, u, v):
 	"""
 		Assumes knowledge of x, y.
@@ -15,155 +15,96 @@ def rule0(pr, mu, x, y, u, v):
 
 def rule0_c1(*args):
 	lpe = args[0]
-	prs = args[1]
-	solver = lpe.solver
+	pr_lasttwo = args[1]
 
- 	# add one bc this function is called to calculate the next pr
-	it = solver.iteration + 1
-	if it in prs:
-		return prs[it]
+	if pr_lasttwo[1] != None: # shortcut
+		next_pr = pr_lasttwo[1]
+	else:
+		prev_pr = pr_lasttwo[0]
+		next_pr = prev_pr # initialize next pr as current pr
+
+		# check conditions are met
+		theta, rho, da, db = lpe.theta, lpe.rho, lpe.da, lpe.db
+		conds_met = rule0_c1_conds_met(lpe, theta, rho, da, db)
+
+		if conds_met:
+			# decrease threshold
+			lpe.theta *= lpe.da
+			lpe.rho *= lpe.db
+
+			# calculate next guess
+			x, y = get(lpe.solver, 'x'), get(lpe.solver, 'y')
+			u, v = get(lpe.solver, 'u'), get(lpe.solver, 'v')
+			next_pr = rule0(prev_pr, lpe.mu, x, y, u, v)
+
+	# store next_pr
+	pr_lasttwo[1] = next_pr
+
+	return next_pr
+
+def rule0_c1_conds_met(lpe, theta, rho, da, db):
+	solver = lpe.solver
 
 	x, u, xt, ut = get(solver, 'x'), get(solver, 'u'), get(solver, 'xt'), get(solver, 'ut')
 	uerr, uterr = abs(x-u), abs(xt-ut)
-	pr = prs[it-1]
-	newpr = pr # initialize next pr as current pr
 
-	c1 = uerr <= lpe.theta
-	c2 = uterr <= lpe.rho
-	c3 = (uerr > 0) and (uterr > 0) # account for x initialized to 0
+	c1 = uerr <= theta
+	c2 = uterr <= rho
+	c3 = (uerr > 0) and (uterr > 0) # to account for x initialized to 0
 
-	if c1 and c2 and c3:
-		# decrease threshold
-		lpe.theta *= lpe.da
-		lpe.rho *= lpe.db
-		mu = lpe.mu
-		y = get(solver, 'y')
-		v = get(solver, 'v')
-		newpr = rule0(pr, mu, x, y, u, v)
+	return c1 and c2 and c3
 
-	prs[it] = newpr
-	return newpr
-
+# ------------------------------ rule1 ------------------------------------------
 def rule1(pr, mu, x, u, v):
 	"""
 		Assumes knowledge of x.
 	"""
 	return (pr*(u-v) + mu*(u-x)) / (x-v)
 
-def rule1_c0(*args):
-	"""
-		rule 1 applied using the conditions for rule0_c1. NOT supposed to work.
-	"""
-	lpe = args[0]
-	prs = args[1]
-	solver = lpe.solver
-
- 	# add one bc this function is called to calculate the next pr
-	it = solver.iteration + 1
-	if it in prs:
-		return prs[it]
-
-	x, u, xt, ut = get(solver, 'x'), get(solver, 'u'), get(solver, 'xt'), get(solver, 'ut')
-	uerr, uterr = abs(x-u), abs(xt-ut)
-	pr = prs[it-1]
-	newpr = pr # initialize next pr as current pr
-
-	c1 = uerr <= lpe.theta
-	c2 = uterr <= lpe.rho
-	c3 = (uerr > 0) and (uterr > 0) # account for x initialized to 0
-
-	if c1 and c2 and c3:
-		# decrease threshold
-		lpe.theta *= lpe.da
-		lpe.rho *= lpe.db
-		mu = lpe.mu
-		v = get(solver, 'v')
-		newpr = rule1(pr, mu, x, u, v)
-
-	prs[it] = newpr
-	return newpr
-
 def rule1_c1(*args):
-	lpe = args[0]
-	prs = args[1]
-	solver = lpe.solver
-
- 	# add one bc this function is called to calculate the next pr
-	it = solver.iteration + 1
-	if it in prs:
-		return prs[it]
-
-	x, u, xt, ut = get(solver, 'x'), get(solver, 'u'), get(solver, 'xt'), get(solver, 'ut')
-	uerr, uterr = abs(x-u), abs(xt-ut)
-	pr = prs[it-1]
-	newpr = pr # initialize next pr as current pr
-
-	c1 = ((it >= 4000) and (lpe.P >= lpe.Pc)) or (it < 4000)
-	c2 = lpe.P >= lpe.Pc
-	c3 = uerr <= lpe.theta
-	c4 = uterr <= lpe.rho
-	c5 = (uerr > 0) and (uterr > 0) # account for x initialized to 0
-
-	if c1 and c2 and c3 and c4 and c5:
-		# decrease thresholds
-		lpe.theta *= lpe.da
-		lpe.rho *= lpe.db
-		mu = lpe.mu
-		v = get(solver, 'v')
-		newpr = rule1(pr, mu, x, u, v)
-	prs[it] = newpr
-	return newpr
-
-def rule1_c2(*args):
 	"""
-	Modified rule1_c1 which increases theta, rho if position error increases by an order of 10
+		function called by GeneralFunction to return next guess.
 	"""
 	lpe = args[0]
-	prs = args[1]
-	uerrs = args[2]
-
-	solver = lpe.solver
-
- 	# add one bc this function is called to calculate the next pr
-	it = solver.iteration + 1
-	if it in prs:
-		return prs[it]
-
-	x, u, xt, ut = get(solver, 'x'), get(solver, 'u'), get(solver, 'xt'), get(solver, 'ut')
-	uerr, uterr = abs(x-u), abs(xt-ut)
-	pr = prs[it-1]
-	newpr = pr # initialize next pr as current pr
-
-	c1 = ((it >= 4000) and (lpe.P >= lpe.Pc)) or (it < 4000)
-	c2 = uerr <= lpe.theta
-	c3 = uterr <= lpe.rho
-	c4 = (uerr > 0) and (uterr > 0)
-
-	if c1 and c2 and c3 and c4:
-		# decrease thresholds
-		lpe.theta *= lpe.da
-		lpe.rho *= lpe.db
-		mu = lpe.mu
-		v = get(solver, 'v')
-		newpr = rule1(pr, mu, x, u, v)
-
-	# increase thresholds when uerr is high
-	if it <= lpe.Pc + 1:
-		uerrs[it-1] = uerr
+	pr_lasttwo = args[1]
+ 	
+	if pr_lasttwo[1] != None: # shortcut
+		next_pr = pr_lasttwo[1]
 	else:
-		uerrs[:] = np.roll(uerrs, -1) # update
-		uerrs[-1] = uerr
+		prev_pr = pr_lasttwo[0]
+		next_pr = prev_pr # initialize next pr as current pr
 
-		m1 = log10mean(uerrs[:-1])
-		m2 = log10mean(uerrs[1:])
+		# check conditions are met
+		theta, rho, da, db, Tc = lpe.theta, lpe.rho, lpe.da, lpe.db, lpe.Tc
+		conds_met = rule1_c1_conds_met(lpe, theta, rho, da, db, Tc)
 
-		c5 = m2 - m1 >= lpe.M
-		# check that threshold was not increased in the last X number of iterations
-		c6 = np.any(np.diff(lpe.thetalist[-lpe.Pc // 20:]) > 0)
+		if conds_met:
+			# decrease thresholds
+			lpe.theta *= lpe.da
+			lpe.rho *= lpe.db
 
-		if c5 and not c6:
-			lpe.theta /= lpe.da
-			lpe.rho /= lpe.db
+			# calculate next guess
+			x, u, v = get(lpe.solver, 'x'), get(lpe.solver, 'u'), get(lpe.solver, 'v')
+			next_pr = rule1(prev_pr, lpe.mu, x, u, v)
+			pr_lasttwo[1] = next_pr
 
-	prs[it] = newpr
-	return newpr
+	# store next_pr
+	pr_lasttwo[1] = next_pr
+
+	return next_pr
+
+def rule1_c1_conds_met(lpe, theta, rho, da, db, Tc):
+	solver = lpe.solver
+	t = solver.sim_time
+
+	x, u, xt, ut = get(solver, 'x'), get(solver, 'u'), get(solver, 'xt'), get(solver, 'ut')
+	uerr, uterr = abs(x-u), abs(xt-ut)
+
+	c1 = lpe.T >= Tc
+	c2 = uerr <= theta
+	c3 = uterr <= rho
+	c4 = (uerr > 0) and (uterr > 0) # to account for x initialized to 0
+
+	return c1 and c2 and c3 and c4
+
+#################################################################################
