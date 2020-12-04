@@ -19,6 +19,4 @@ python3 example.py
 * [`thresholds/`](https://github.com/unis-ing/lorenz-parameter-estimation/tree/master/thresholds) : values obtained from parameter tuning the `a` and `b` arguments of `rule1_c1` (see Appendix A.2.4 of the write-up).
 
 ## Write-up
-A first draft of the project write-up is available [here](https://github.com/unis-ing/lorenz-parameter-estimation/blob/master/writeup.pdf) 🥳. 
-
-It includes: a statement of the research problem, background information on the Lorenz equations, algorithms for performing parameter estimation (implemented by the code in this repository), numerical results, and additional questions we have re: the aforementioned problem.
+This will be temporarily unavailable while revisions are made.
