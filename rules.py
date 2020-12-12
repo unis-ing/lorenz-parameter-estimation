@@ -40,22 +40,22 @@ def rule1(s, p):
     return (p.pr * (s.u - s.v) + p.mu * (s.u - s.x)) / (s.x - s.v)
 
 
-def rule2(s, p):
+def rule2z(s, p):
     its = int(p.Tc / p.dt)
     return -1 - np.mean(s.z_list[-its:])
 
 
-def rule2a(s, p):
+def rule2w(s, p):
     its = int(p.Tc / p.dt)
     return -1 - np.mean(s.w_list[-its:])
 
 
-def apply_nothing(s, p, rule_f):
+def apply_nothing(s, p, rule_f, t):
     """ cn = 0 """
     return rule_f(s, p)
 
 
-def apply_Tc(s, p, rule_f):
+def apply_Tc(s, p, rule_f, t):
     """ cn = 2 """
     c = p.T >= p.Tc
 
@@ -63,11 +63,11 @@ def apply_Tc(s, p, rule_f):
         p.reset_T()
         return rule_f(s, p)
     else:
-        p.increase_T()
+        p.update_T(t_curr=t, t_old=s.t)
         return p.pr
 
 
-def apply_thresholds_and_Tc(s, p, rule_f):
+def apply_thresholds_and_Tc(s, p, rule_f, t):
     """ cn = 1 """
     if p.nudge == 'u':
         poserr = abs(s.x - s.u)
@@ -82,7 +82,7 @@ def apply_thresholds_and_Tc(s, p, rule_f):
     c1 = p.T >= p.Tc
     c2 = poserr <= p.a
     c3 = velerr <= p.b
-    c4 = poserr > 0 and velerr > 0
+    c4 = (poserr > 0) & (velerr > 0)
     c = c1 & c2 & c3 & c4
 
     if c:
@@ -95,5 +95,5 @@ def apply_thresholds_and_Tc(s, p, rule_f):
         return rule_f(s, p)
 
     else:
-        p.increase_T()
+        p.update_T(t_curr=t, t_old=s.t)
         return p.pr

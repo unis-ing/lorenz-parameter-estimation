@@ -1,15 +1,11 @@
-
+from rules import *
+from helpers import *
 from scipy.integrate import odeint
+import numpy as np
+from copy import deepcopy
 import time
 import json
-import h5py as h5
-from os import mkdir
-from os.path import isfile
-from rules import *
-
-SAVE_FOLDER = 'sim/'
-IC_FOLDER = 'ic/'
-
+import matplotlib.pyplot as plt
 
 class LorenzParams:
     """
@@ -50,8 +46,8 @@ class LorenzParams:
     def reset_T(self):
         self.T = 0
 
-    def increase_T(self):
-        self.T += self.dt
+    def update_T(self, t_curr, t_old):
+        self.T += t_curr - t_old
 
     def decrease_a(self):
         self.a *= self.da
@@ -78,10 +74,53 @@ class LorenzState:
         self.z_list = []
         self.w_list = []
 
+        self.t = 0 # previous simulation time
+
+    def update_t(self, t):
+        self.t = t
+
 # ------------------------------------------------------------------
-#				functions defining time derivatives
+#                   function called by odeint
 # ------------------------------------------------------------------
 
+def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
+
+    # update p based on states from last iteration
+    next_pr = get_pr(s, p, rule_f, t) # need to pass time in order to update T
+    p.pr = next_pr
+    p.prs.append(next_pr)
+
+    # update s with positions
+    s.x, s.y, s.z, s.u, s.v, s.w = XU
+
+    # update z_list, w_list
+    s.z_list.append(s.z)
+    s.w_list.append(s.w)
+
+    # calculate new time deriv's with new pr
+    xt = derivs[0](s, p)
+    yt = derivs[1](s, p)
+    zt = derivs[2](s, p)
+    ut = derivs[3](s, p)
+    vt = derivs[4](s, p)
+    wt = derivs[5](s, p)
+
+    # update s with new time derivatives
+    s.xt = xt
+    s.yt = yt
+    s.zt = zt
+    s.ut = ut
+    s.vt = vt
+    s.wt = wt
+
+    # store current time
+    s.update_t(t)
+
+    return [xt, yt, zt, ut, vt, wt]
+
+# ------------------------------------------------------------------
+#							run odeint
+# ------------------------------------------------------------------
 
 def get_deriv_fs(nudge):
     """
@@ -101,102 +140,40 @@ def get_deriv_fs(nudge):
     return (XT, YT, ZT, UT, VT, WT)
 
 
-def XT(s, p):
-    return p.PR * (s.y - s.x)
+def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
+    # set get_pr
+    get_pr, rule_f = map_rule_to_f(p.rule)
 
+    # set derivs
+    if deriv_fs == None:
+        deriv_fs = get_deriv_fs(p.nudge)
 
-def YT(s, p):
-    return -p.PR * s.x - s.y - s.x * s.z
+    # initialize system
+    X0, Xt0 = get_ic(p)
+    XU0 = np.array(X0 + [0.1, 0.1, 0.1])
+    XUt0 = np.array(Xt0 + [0, 0, 0])
+    s = LorenzState(XU0, XUt0)
 
+    t = np.arange(0, sim_time, step=p.dt)
 
-def ZT(s, p):
-    return s.x * s.y - p.B*(s.z + p.PR + p.RA)
+    start = time.time()
+    sol, infodict = odeint(nudged_lorenz, XU0, t, args=(
+        s, p, deriv_fs, get_pr, rule_f), full_output=True)
 
+    if complete_msg:
+        print('Runtime: {:.4f} s'.format(time.time() - start))
 
-def ut(s, p):
-    return p.pr * (s.v - s.u) - p.mu * (s.u - s.x)
+    # transform list of guesses to be same shape as output
+    nfe = infodict['nfe']
+    prs = np.array(p.prs)[nfe]
+    prs = np.insert(prs, p.pr0, 0)
 
+    # calculate derivatives
+    s_ = LorenzState(sol.T, np.zeros(6))
+    derivs = np.array([deriv_fs[i](s_, p) for i in range(6)]).T
 
-def vt(s, p):
-    return -p.pr * s.u - s.v - s.u * s.w
+    return sol, derivs, prs, infodict
 
-
-def wt(s, p):
-    return s.u * s.v - p.B * (s.w + p.pr + p.RA)
-
-
-def ut_nudge(s, p):  # nudge u with x
-    return ut(s, p) - p.mu * (s.u - s.x)
-
-
-def vt_nudge(s, p):  # nudge v with y
-    return vt(s, p) - p.mu * (s.v - s.y)
-
-
-def wt_nudge(s, p):  # nudge w with z
-    return wt(s, p) - p.mu * (s.w - s.z)
-
-# ------------------------------------------------------------------
-#                           make ic
-# ------------------------------------------------------------------
-
-def make_ic(p):
-
-    def lorenz(X, t, PR=p.PR, RA=p.RA, B=p.B):
-        x, y, z = X
-        return [PR*(y - x), -PR*x - y - x*z, x*y - B*(z + PR + RA)]
-
-    # picked dt and sim_time arbitrarily -- maybe change later
-    dt = 0.001
-    sim_time = 3
-    t = np.arange(0, sim_time, step=dt)
-    X0 = np.full(3, fill_value=10)
-
-    sol = odeint(lorenz, X0, t)
-    derivs = np.array(lorenz(sol.T, t)).T
-    return sol, derivs
-
-def get_ic_path(p):
-    return IC_FOLDER + 'PR_{:.0f}_RA_{:.0f}_B_{:.4f}'.format(p.PR, p.RA, p.B) + '.h5'
-
-def ic_exists(p):
-    path = get_ic_path(p)
-    return isfile(path)
-
-def save_ic(p, sol, derivs):
-    path = get_ic_path(p)
-
-    # store data as .h5
-    f = h5.File(path, 'w')
-    f.create_dataset('x', data=sol[:, 0])
-    f.create_dataset('y', data=sol[:, 1])
-    f.create_dataset('z', data=sol[:, 2])
-    f.create_dataset('xt', data=derivs[:, 0])
-    f.create_dataset('yt', data=derivs[:, 1])
-    f.create_dataset('zt', data=derivs[:, 2])
-    f.close()
-
-def get_ic(p):
-    if ic_exists(p):
-        f = h5.File(get_ic_path(p), 'r')
-        x0 = np.array(f['x'])[-1]
-        y0 = np.array(f['y'])[-1]
-        z0 = np.array(f['z'])[-1]
-        xt0 = np.array(f['xt'])[-1]
-        yt0 = np.array(f['yt'])[-1]
-        zt0 = np.array(f['zt'])[-1]
-    else:
-        print('Making initial conditions.')
-        sol, derivs = make_ic(p)
-        save_ic(p, sol, derivs)
-        x0 = sol[:,0][-1]
-        y0 = sol[:,0][-1]
-        z0 = sol[:,0][-1]
-        xt0 = sol[:,0][-1]
-        yt0 = sol[:,0][-1]
-        zt0 = sol[:,0][-1]
-
-    return [x0, y0, z0], [xt0, yt0, zt0]
 
 # ------------------------------------------------------------------
 #                           save data
@@ -289,74 +266,92 @@ def save_sim(p, sol, derivs, prs, parent_folder='/'):
         json.dump(param_dict, outfile)
 
 # ------------------------------------------------------------------
-#                   function called by odeint
+#                    determine thresholds a, b
 # ------------------------------------------------------------------
 
-
-def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
-    # update p based on states from last iteration
-    next_pr = get_pr(s, p, rule_f)
-    p.pr = next_pr
-    p.prs.append(next_pr)
-
-    # update s with positions
-    s.x, s.y, s.z, s.u, s.v, s.w = XU
-
-    # update z_list, w_list
-    s.z_list.append(s.z)
-    s.w_list.append(s.w)
-
-    # calculate new time deriv's with new pr
-    xt = derivs[0](s, p)
-    yt = derivs[1](s, p)
-    zt = derivs[2](s, p)
-    ut = derivs[3](s, p)
-    vt = derivs[4](s, p)
-    wt = derivs[5](s, p)
-
-    # update s with new time derivatives
-    s.xt = xt
-    s.yt = yt
-    s.zt = zt
-    s.ut = ut
-    s.vt = vt
-    s.wt = wt
-
-    return [xt, yt, zt, ut, vt, wt]
-
-# ------------------------------------------------------------------
-#							run odeint
-# ------------------------------------------------------------------
+def pick_best_threshold(p, tholds, errs):
+    """
+    Pick a,b from results of test_thresholds.
+    """
+    if min(errs) >= abs(p.PR - p.pr0):
+        print('None of the thresholds tested result in error below the initial error.')
+        return False, False
+        
+    minerr_tholds = tholds[errs == min(errs)]
+    a, b = minerr_tholds[np.sum(minerr_tholds, 1).argmin()]
+    return a, b
 
 
-def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
-        # set get_pr
-    get_pr, rule_f = map_rule_to_f(p.rule)
+def test_thresholds(p, num=500, deriv_fs=None, plot=True):
+    """
+    This function generates a range of values for the a,b parameters and
+    randomly tests 500 (default) of them.
+    """
+    # sim time for a_, b_
+    if hasattr(p, 'Tc'):
+        sim_time = 1.1 * p.Tc
+    else:
+        sim_time = 5
 
-    # set derivs
-    if deriv_fs == None:
-        deriv_fs = get_deriv_fs(p.nudge)
+    # run first sim to determine range of a, b to test
+    p_ = deepcopy(p)
+    sol, derivs, _, _ = simulate(p_, sim_time=sim_time, complete_msg=False)
 
-    # initialize system
-    X0, Xt0 = get_ic(p)
-    XU0 = np.array(X0 + [0.1, 0.1, 0.1])
-    XUt0 = np.array(Xt0 + [0, 0, 0])
-    s = LorenzState(XU0, XUt0)
+    if p.nudge == 'u':
+        i1 = 0
+        i2 = 3
+    elif p.nudge == 'v':
+        i1 = 1
+        i2 = 4
+    elif p.nudge == 'w':
+        i1 = 2
+        i2 = 5
 
-    t = np.arange(0, sim_time, step=p.dt)
+    pos_err = abs(sol[:, i1] - sol[:, i2])
+    vel_err = abs(derivs[:, i1] - derivs[:, i2])
+    a_ = np.min(pos_err)
+    b_ = np.min(vel_err)
 
+    # generate grid from [-3, 3]^2 with mesh size 0.01
+    a_min = max(0, a_-3)
+    a_max = a_ + 3
+    b_min = max(0, b_-3)
+    b_max = b_ + 3
+    grid = np.mgrid[a_min:a_max:0.01,b_min:b_max:0.01].T.reshape(-1,2)
+
+    # randomly choose num (default=500) points
+    C = np.random.choice(range(int(grid.shape[0])), num)
+
+    # sim time for testing
+    if hasattr(p, 'Tc'):
+        sim_time = 3.1 * p.Tc
+    else:
+        sim_time = 15
+
+    errs = []
     start = time.time()
-    sol, infodict = odeint(nudged_lorenz, XU0, t, args=(
-        s, p, deriv_fs, get_pr, rule_f), full_output=True)
+    for i in range(C.size):
+        ind = C[i]
+        p_ = deepcopy(p)
+        p_.a = grid[ind,0]
+        p_.b = grid[ind,1]
 
-    if complete_msg:
-        print('Runtime: {:.4f} s'.format(time.time() - start))
-        print('Effective Tc: {:.4f}'.format(p.Tc * sol[:, 0].size / len(p.prs)))
+        _, _, prs, _ = simulate(p_, sim_time=sim_time, complete_msg=False)
+        errs.append(abs(prs[-1] - p.PR))
 
-    prs = np.array(p.prs)
+        if (i + 1) % (num/10) == 0:
+            print('{0:} % complete. {1:.4f} sec elapsed.'.format(100*(i+1)//num, time.time()-start))
 
-    # calculate derivatives
-    s_ = LorenzState(sol.T, np.zeros(6))
-    derivs = np.array([deriv_fs[i](s_, p) for i in range(6)]).T
+    tholds = grid[C]
+    errs = np.array(errs)
 
-    return sol, derivs, prs, infodict
+    if plot:
+        plt.figure(figsize=(4.5,4))
+        sc = plt.scatter(tholds[:,0], tholds[:,1], c=errs, cmap='cool')
+        plt.colorbar(sc)
+        plt.xlabel('a')
+        plt.ylabel('b')
+        plt.title('Error for various (a,b)')
+        plt.show()
+
+    return tholds, errs
