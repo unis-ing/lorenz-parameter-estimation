@@ -1,9 +1,5 @@
 import numpy as np
 
-# ------------------------------------------------------------------
-#							rules
-# ------------------------------------------------------------------
-
 
 def map_rule_to_f(rule):
     """
@@ -31,6 +27,12 @@ def map_rule_to_f(rule):
 
     return get_pr, rule_f
 
+# ------------------------------------------------------------------
+#                           rules
+# ------------------------------------------------------------------
+"""
+Add new rules here. Must have function signature (s, p) and return a number.
+"""
 
 def no_update(s, p):
     return p.pr
@@ -49,26 +51,23 @@ def rule2w(s, p):
     its = int(p.Tc / p.dt)
     return -1 - np.mean(s.w_list[-its:])
 
+# ------------------------------------------------------------------
+#                           conditions
+# ------------------------------------------------------------------
+"""
+Add new conditions here. Must have function signature (s, p, rule_f, t) 
+and return a number.
+"""
 
 def apply_nothing(s, p, rule_f, t):
-    """ cn = 0 """
+    """ condition # 0 """
+
     return rule_f(s, p)
 
 
-def apply_Tc(s, p, rule_f, t):
-    """ cn = 2 """
-    c = p.T >= p.Tc
-
-    if c:
-        p.reset_T()
-        return rule_f(s, p)
-    else:
-        p.update_T(t_curr=t, t_old=s.t)
-        return p.pr
-
-
 def apply_thresholds_and_Tc(s, p, rule_f, t):
-    """ cn = 1 """
+    """ condition # 1 """
+
     if p.nudge == 'u':
         poserr = abs(s.x - s.u)
         velerr = abs(s.xt - s.ut)
@@ -79,13 +78,13 @@ def apply_thresholds_and_Tc(s, p, rule_f, t):
         poserr = abs(s.z - s.w)
         velerr = abs(s.zt - s.wt)
 
+    # check conditions are met
     c1 = p.T >= p.Tc
     c2 = poserr <= p.a
     c3 = velerr <= p.b
     c4 = (poserr > 0) & (velerr > 0)
-    c = c1 & c2 & c3 & c4
 
-    if c:
+    if c1 & c2 & c3 & c4:
         p.decrease_a()
         p.decrease_b()
         p.update_a_list()
@@ -94,6 +93,18 @@ def apply_thresholds_and_Tc(s, p, rule_f, t):
 
         return rule_f(s, p)
 
+    else:
+        p.update_T(t_curr=t, t_old=s.t)
+        return p.pr
+
+
+def apply_Tc(s, p, rule_f, t):
+    """ condition # 2 """
+
+    if p.T >= p.Tc:
+        p.reset_T()
+        return rule_f(s, p)
+        
     else:
         p.update_T(t_curr=t, t_old=s.t)
         return p.pr

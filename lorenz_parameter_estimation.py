@@ -1,52 +1,65 @@
-from rules import *
-from helpers import *
-from scipy.integrate import odeint
-import numpy as np
 from copy import deepcopy
-import time
 import json
 import matplotlib.pyplot as plt
+import numpy as np
+from scipy.integrate import odeint
+import time
+
+from derivs import *
+from helpers import *
+from rules import *
+
 
 class LorenzParams:
     """
-    store the current equation and algorithm parameters.
+    Store the current equation and algorithm parameters.
     """
 
-    def __init__(self, PR, RA, B, mu, pr, dt, rule, nudge, **kwargs):
-        assert nudge in ['u', 'v', 'w'], 'nudge must be "u", "v", or "w".'
+    def __init__(self, PR, RA, B, mu, pr0, dt, rule, nudge, **kwargs):
+        assert nudge in ['u', 'v', 'w'], 'Nudge must be "u", "v", or "w".'
         self.PR = PR
         self.RA = RA
         self.B = B
         self.mu = mu
-        self.pr0 = pr  # initial
-        self.pr = pr  # current
+        self.pr0 = pr0  # initial
+        self.pr = pr0  # current
         self.dt = dt
         self.rule = rule
         self.nudge = nudge
 
-        # initialize
+        # list for storing guesses
         self.prs = [pr]
 
-        if 'a' in kwargs:
-            self.a0 = kwargs['a']  # initial
-            self.a = kwargs['a']
-            self.a_list = []
-        if 'b'in kwargs:
-            self.b0 = kwargs['b']  # initial
-            self.b = kwargs['b']
-            self.b_list = []
-        if 'da' in kwargs:
-            self.da = kwargs['da']
-        if 'db' in kwargs:
-            self.db = kwargs['db']
-        if 'Tc' in kwargs:
-            self.Tc = kwargs['Tc']
-            self.T = 0
+        # condition number
+        cn = int(rule[rule.find('_c')+2:])
+
+        if cn == 0:
+            pass
+
+        if cn == 1:
+            if 'a0' in kwargs:
+                self.a0 = kwargs['a0']  # initial
+                self.a = kwargs['a0'] # current
+                self.a_list = []
+            if 'b0'in kwargs:
+                self.b0 = kwargs['b0']  # initial
+                self.b = kwargs['b0'] # current
+                self.b_list = []
+            if 'da' in kwargs:
+                self.da = kwargs['da']
+            if 'db' in kwargs:
+                self.db = kwargs['db']
+
+        if cn == 1 or cn == 2:
+            if 'Tc' in kwargs:
+                self.Tc = kwargs['Tc']
+                self.T = 0
 
     def reset_T(self):
         self.T = 0
 
     def update_T(self, t_curr, t_old):
+        # increment T by the difference between current time and prev time
         self.T += t_curr - t_old
 
     def decrease_a(self):
@@ -64,7 +77,7 @@ class LorenzParams:
 
 class LorenzState:
     """
-    store the current state of the system.
+    Store the current state of the system.
     """
 
     def __init__(self, XU, XUt):
@@ -76,24 +89,31 @@ class LorenzState:
 
         self.t = 0 # previous simulation time
 
-    def update_t(self, t):
-        self.t = t
-
 # ------------------------------------------------------------------
 #                   function called by odeint
 # ------------------------------------------------------------------
 
 def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
+    """
+    Function called by odeint.
 
-    # update p based on states from last iteration
-    next_pr = get_pr(s, p, rule_f, t) # need to pass time in order to update T
+    Parameters
+    ----------------
+    derivs : list of functions which implement the time derivatives.
+    get_pr : function which returns the next guess.
+    rule_f : function which implements the Prandtl estimate (called by get_pr).
+
+    """
+
+    # update p based on XU (values from the last function call)
+    next_pr = get_pr(s, p, rule_f, t) # need to pass t in order to update T
     p.pr = next_pr
     p.prs.append(next_pr)
 
     # update s with positions
     s.x, s.y, s.z, s.u, s.v, s.w = XU
 
-    # update z_list, w_list
+    # update z_list, w_list (only used for rule2z/2w but it doesn't hurt)
     s.z_list.append(s.z)
     s.w_list.append(s.w)
 
@@ -114,30 +134,13 @@ def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
     s.wt = wt
 
     # store current time
-    s.update_t(t)
+    s.t = t
 
     return [xt, yt, zt, ut, vt, wt]
 
 # ------------------------------------------------------------------
 #							run odeint
 # ------------------------------------------------------------------
-
-def get_deriv_fs(nudge):
-    """
-    returns list of deriv functions based on nudge.
-    """
-    UT = ut
-    VT = vt
-    WT = wt
-
-    if nudge == 'u':
-        UT = ut_nudge
-    elif nudge == 'v':
-        VT = vt_nudge
-    elif nudge == 'w':
-        WT = wt_nudge
-
-    return (XT, YT, ZT, UT, VT, WT)
 
 
 def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
@@ -150,120 +153,40 @@ def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
 
     # initialize system
     X0, Xt0 = get_ic(p)
-    XU0 = np.array(X0 + [0.1, 0.1, 0.1])
-    XUt0 = np.array(Xt0 + [0, 0, 0])
+    XU0 = np.append(X0, [0.1, 0.1, 0.1])
+    XUt0 = np.append(Xt0, [0, 0, 0])
     s = LorenzState(XU0, XUt0)
 
+    # list of times to solve the equation
     t = np.arange(0, sim_time, step=p.dt)
 
     start = time.time()
     sol, infodict = odeint(nudged_lorenz, XU0, t, args=(
-        s, p, deriv_fs, get_pr, rule_f), full_output=True)
+        s, p, deriv_fs, get_pr, rule_f), full_output=True,
+        mxstep=100)
 
+    # print completed message
     if complete_msg:
-        print('Runtime: {:.4f} s'.format(time.time() - start))
+        final_err = abs(p.prs[-1] - p.PR)
+        print('Final Prandtl error: {:.8f}. Runtime: {:.4f} s'.format(final_err, 
+            time.time() - start))
 
     # transform list of guesses to be same shape as output
     nfe = infodict['nfe']
-    prs = np.array(p.prs)[nfe]
-    prs = np.insert(prs, p.pr0, 0)
+    try:
+        prs = np.array(p.prs)[nfe]
+    except IndexError:
+        print('Indexing error in simulation. Returning empty arrays.')
+        return np.empty(0), np.empty(0), np.empty(0), infodict
+
+    # this is to ensure prs has the same shape as the solution
+    prs = np.append(prs, p.pr0)
 
     # calculate derivatives
     s_ = LorenzState(sol.T, np.zeros(6))
     derivs = np.array([deriv_fs[i](s_, p) for i in range(6)]).T
 
     return sol, derivs, prs, infodict
-
-
-# ------------------------------------------------------------------
-#                           save data
-# ------------------------------------------------------------------
-
-
-def get_sim_folder(p):
-    labeled_params = [['PR', p.PR],
-                      ['RA', p.RA],
-                      ['pr0', p.pr0],
-                      ['mu', p.mu],
-                      ['dt', p.dt]]
-    pd = p.__dict__
-
-    if 'a' in pd:
-        labeled_params.append(['a', p.a])
-    if 'b' in pd:
-        labeled_params.append(['b', p.b])
-    if 'da' in pd:
-        labeled_params.append(['da', p.da])
-    if 'db' in pd:
-        labeled_params.append(['db', p.db])
-    if 'Tc' in pd:
-        labeled_params.append(['Tc', p.Tc])
-
-    param_str = '_'.join('{}_{:f}'.format(*i).rstrip('0').rstrip('.')
-                         for i in labeled_params)
-    param_str = param_str.replace('.', '_')
-    path = p.rule + '_' + 'nudge' + '_' + p.nudge + '_' + param_str + '/'
-
-    return path
-
-
-def save_sim(p, sol, derivs, prs, parent_folder='/'):
-    """
-    parent_folder (ex. sim/sample/)
-    """
-    assert parent_folder[-1] == '/', 'parent_folder must end in "/".'
-    if parent_folder == '/':
-        parent_folder = SAVE_FOLDER
-
-    # make folder in sim
-    folder = parent_folder + get_sim_folder(p)
-    mkdir(folder)
-
-    # store data as .h5
-    data_path = folder + 'data.h5'
-    f = h5.File(data_path, 'w')
-    f.create_dataset('pr', data=prs)
-
-    f.create_dataset('x', data=sol[:, 0])
-    f.create_dataset('y', data=sol[:, 1])
-    f.create_dataset('z', data=sol[:, 2])
-    f.create_dataset('u', data=sol[:, 3])
-    f.create_dataset('v', data=sol[:, 4])
-    f.create_dataset('w', data=sol[:, 5])
-
-    f.create_dataset('xt', data=derivs[:, 0])
-    f.create_dataset('yt', data=derivs[:, 1])
-    f.create_dataset('zt', data=derivs[:, 2])
-    f.create_dataset('ut', data=derivs[:, 3])
-    f.create_dataset('vt', data=derivs[:, 4])
-    f.create_dataset('wt', data=derivs[:, 5])
-
-    if 'a' in p.__dict__:
-        f.create_dataset('a', data=p.a_list)
-    if 'b' in p.__dict__:
-        f.create_dataset('b', data=p.b_list)
-    f.close()
-
-    # make dictionary with non-list attributes
-    param_dict = p.__dict__.copy()
-    param_dict.pop('prs')
-    param_dict.pop('pr')
-
-    if 'a' in param_dict:
-        param_dict.pop('a')
-        param_dict.pop('da')
-        param_dict.pop('a_list')
-        param_dict.pop('b')
-        param_dict.pop('db')
-        param_dict.pop('b_list')
-
-    if 'T' in param_dict:
-        param_dict.pop('T')
-
-    # store params as .json
-    param_path = folder + 'params.json'
-    with open(param_path, 'w') as outfile:
-        json.dump(param_dict, outfile)
 
 # ------------------------------------------------------------------
 #                    determine thresholds a, b
@@ -274,9 +197,9 @@ def pick_best_threshold(p, tholds, errs):
     Pick a,b from results of test_thresholds.
     """
     if min(errs) >= abs(p.PR - p.pr0):
-        print('None of the thresholds tested result in error below the initial error.')
-        return False, False
-        
+        print('None of the thresholds tested result in error below the initial error. Returning original thresholds.')
+        return p.a0, p.b0
+
     minerr_tholds = tholds[errs == min(errs)]
     a, b = minerr_tholds[np.sum(minerr_tholds, 1).argmin()]
     return a, b
@@ -286,6 +209,8 @@ def test_thresholds(p, num=500, deriv_fs=None, plot=True):
     """
     This function generates a range of values for the a,b parameters and
     randomly tests 500 (default) of them.
+
+    Does not alter p.
     """
     # sim time for a_, b_
     if hasattr(p, 'Tc'):
@@ -295,6 +220,7 @@ def test_thresholds(p, num=500, deriv_fs=None, plot=True):
 
     # run first sim to determine range of a, b to test
     p_ = deepcopy(p)
+    p_.Tc = np.inf # lazy way to prevent guess from updating
     sol, derivs, _, _ = simulate(p_, sim_time=sim_time, complete_msg=False)
 
     if p.nudge == 'u':
@@ -319,8 +245,10 @@ def test_thresholds(p, num=500, deriv_fs=None, plot=True):
     b_max = b_ + 3
     grid = np.mgrid[a_min:a_max:0.01,b_min:b_max:0.01].T.reshape(-1,2)
 
-    # randomly choose num (default=500) points
-    C = np.random.choice(range(int(grid.shape[0])), num)
+    # randomly choose (a,b) to test
+    num_pairs = grid.shape[0]
+    C = np.random.choice(range(num_pairs), num)
+    tholds = grid[C]
 
     # sim time for testing
     if hasattr(p, 'Tc'):
@@ -329,29 +257,64 @@ def test_thresholds(p, num=500, deriv_fs=None, plot=True):
         sim_time = 15
 
     errs = []
+    delete_ind = []
     start = time.time()
     for i in range(C.size):
         ind = C[i]
         p_ = deepcopy(p)
-        p_.a = grid[ind,0]
-        p_.b = grid[ind,1]
+        p_.a = grid[ind, 0]
+        p_.b = grid[ind, 1]
 
         _, _, prs, _ = simulate(p_, sim_time=sim_time, complete_msg=False)
-        errs.append(abs(prs[-1] - p.PR))
 
-        if (i + 1) % (num/10) == 0:
-            print('{0:} % complete. {1:.4f} sec elapsed.'.format(100*(i+1)//num, time.time()-start))
+        if prs.size > 0: # skip sims where excessive calls were made
+            errs.append(abs(prs[-1] - p.PR))
+        else:
+            # delete from tholds
+            delete_ind.append(i)
 
-    tholds = grid[C]
+        if (i + 1) % (num / 10) == 0:
+            print('{0:} % complete. {1:.4f} sec elapsed.'.format(100*(i+1)//num, 
+                time.time()-start))
+
+    tholds = np.delete(tholds, delete_ind, axis=0)
     errs = np.array(errs)
 
     if plot:
-        plt.figure(figsize=(4.5,4))
-        sc = plt.scatter(tholds[:,0], tholds[:,1], c=errs, cmap='cool')
+        # ---------------------make colormap----------------------------------
+        orig = matplotlib.cm.get_cmap('bwr', 6)
+        errlog = np.log10(errs)
+
+        if np.all(errlog >= 1): # only red dots occur
+            cmap = truncate_colormap(orig, 0.5, 0.99)
+
+        elif np.any(errlog > 1): # red and blue dots occur
+            mp = (1 - min(errlog)) / (max(errlog) - min(errlog))
+            if mp < 0: 
+                cmap = orig
+            else: 
+                cmap = shiftedColorMap(orig, midpoint=mp, name='shifted')
+                
+        else: # no red dots occur
+            cmap = truncate_colormap(orig, 0, 0.49)
+
+        plt.figure(figsize=(4.5,3.5))
+
+        # plot points w no update
+        ind = np.where(errlog == 1)
+        plt.scatter(tholds[ind, 0], tholds[ind, 1], color='white', edgecolor='k', s=50)
+
+        # plot everything else
+        ind = np.where(errlog != 1)
+
+        sc = plt.scatter(tholds[ind, 0], tholds[ind, 1], s=50, c=errlog[ind], 
+            edgecolor='k', cmap=cmap)
+
         plt.colorbar(sc)
         plt.xlabel('a')
         plt.ylabel('b')
         plt.title('Error for various (a,b)')
+        plt.gca().set_facecolor('lightgray')
         plt.show()
 
     return tholds, errs
