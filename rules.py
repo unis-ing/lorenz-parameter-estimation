@@ -24,11 +24,8 @@ def map_rule_to_f(rule):
             get_pr = apply_thresholds_and_Tc
         elif cn == 2:
             get_pr = apply_Tc
-
-        # ------------------------------------
         elif cn == 3:
-            get_pr = test
-        # ------------------------------------
+            get_pr = apply_approx_thresholds_and_Tc
 
     return get_pr, rule_f
 
@@ -57,11 +54,11 @@ def rule2w(s, p):
     return -1 - np.mean(s.w_list[-its:])
 
 
-def rule0(s, p):
-    return (p.pr * (s.u - s.v)) / (s.x - s.v)
+# def rule0(s, p):
+#     return (p.pr * (s.u - s.v)) / (s.x - s.v)
 
-def rule3(s, p):
-    return s.w - (s.u*s.v - p.mu*(s.w-s.z)) / p.B + p.pr
+# def rule3(s, p):
+#     return s.w - (s.u*s.v - p.mu*(s.w-s.z)) / p.B + p.pr
 
 
 # ------------------------------------------------------------------
@@ -107,7 +104,7 @@ def apply_thresholds_and_Tc(s, p, rule_f, t):
         return rule_f(s, p)
 
     else:
-        p.update_T(t_curr=t, t_old=s.t)
+        p.update_T(t_curr=t, t_old=s.t_prev)
         return p.pr
 
 
@@ -119,30 +116,34 @@ def apply_Tc(s, p, rule_f, t):
         return rule_f(s, p)
         
     else:
-        p.update_T(t_curr=t, t_old=s.t)
+        p.update_T(t_curr=t, t_old=s.t_prev)
         return p.pr
 
-
-def test(s, p, rule_f, t):
+def apply_approx_thresholds_and_Tc(s, p, rule_f, t):
     """ condition # 3 """
-    poserr = abs(s.y - s.v)
-    velerr = abs(s.xt - s.ut)
+    p.update_T(t_curr=t, t_old=s.t_prev)
 
-    # check conditions are met
-    c1 = p.T >= p.Tc
-    c2 = poserr <= p.a
-    c3 = velerr <= p.b
-    c4 = (poserr > 0) & (velerr > 0)
-
-    if c1 & c2 & c3 & c4:
-        p.decrease_a()
-        p.decrease_b()
-        p.update_a_list()
-        p.update_b_list()
-        p.reset_T()
-
-        return rule_f(s, p)
-
-    else:
-        p.update_T(t_curr=t, t_old=s.t)
+    if s.t_prev <= p.dt: # need at least 2 elem's in x_list
         return p.pr
+    else:
+        if t != s.t_prev:
+            poserr = abs(s.x - s.u)
+            finite_diff = (s.x - s.x_) / (t - s.t_prev)
+            velerr = abs(finite_diff - s.ut)
+
+            # check conditions are met
+            c1 = p.T >= p.Tc
+            c2 = poserr <= p.a
+            c3 = velerr <= p.b
+            c4 = (poserr > 0) & (velerr > 0)
+
+            if c1 & c2 & c3 & c4:
+                p.decrease_a()
+                p.decrease_b()
+                p.update_a_list()
+                p.update_b_list()
+                p.reset_T()
+
+                return rule_f(s, p)
+
+    return p.pr

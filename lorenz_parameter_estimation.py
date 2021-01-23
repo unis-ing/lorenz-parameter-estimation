@@ -41,11 +41,11 @@ class LorenzParams:
 
             if cn == 1 or cn == 3:
                 if 'a0' in kwargs:
-                    self.a0 = kwargs['a0']  # initial
+                    self.a0 = kwargs['a0'] # initial
                     self.a = kwargs['a0'] # current
                     self.a_list = []
                 if 'b0'in kwargs:
-                    self.b0 = kwargs['b0']  # initial
+                    self.b0 = kwargs['b0'] # initial
                     self.b = kwargs['b0'] # current
                     self.b_list = []
                 if 'da' in kwargs:
@@ -90,7 +90,8 @@ class LorenzState:
         self.z_list = []
         self.w_list = []
 
-        self.t = 0 # previous simulation time
+        self.t_prev = 0 # store prev simulation time
+        self.x_ = 0 # previous value of x
 
 # ------------------------------------------------------------------
 #                   function called by odeint
@@ -114,6 +115,7 @@ def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
     p.prs.append(next_pr)
 
     # update s with positions
+    s.x_ = s.x
     s.x, s.y, s.z, s.u, s.v, s.w = XU
 
     # update z_list, w_list (only used for rule2z/2w but it doesn't hurt)
@@ -136,8 +138,8 @@ def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
     s.vt = vt
     s.wt = wt
 
-    # store current time
-    s.t = t
+    # store prev, current time
+    s.t_prev = t
 
     return [xt, yt, zt, ut, vt, wt]
 
@@ -182,7 +184,7 @@ def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
     # print completed message
     if complete_msg:
         final_err = abs(p.prs[-1] - p.PR)
-        print('Final Prandtl error: {:.8f}. Runtime: {:.4f} s'.format(final_err, 
+        print('Final Prandtl error: {:.4e}. Runtime: {:.4f} s'.format(final_err, 
             time.time() - start))
 
     # reshape list of guesses to match output
@@ -236,6 +238,7 @@ def test_thresholds(p, num_test=500, num_updates=3.1, deriv_fs=None,
     save_plot (boolean) : set to True to save plot to THOLDPLOTS_FOLDER.
     """
     assert hasattr(p, 'Tc'), 'LorenzParams must have the attribute "Tc".'
+    print('Testing thresholds.')
 
     # run sim to determine range of a, b to test
     sim_time = 1.1 * p.Tc
@@ -299,10 +302,11 @@ def test_thresholds(p, num_test=500, num_updates=3.1, deriv_fs=None,
     tholds = np.delete(tholds, delete_ind, axis=0)
     pr_errs = np.array(pr_errs)
 
-    C = np.log10(abs(p.PR - p.pr0))
+    # create plot
     if make_plot:
-        fig, ax = make_thold_plot(p, tholds, pr_errs)
+        fig, ax = make_thold_plot(p, tholds, pr_errs, num_test)
 
+        # save plot
         if save_plot:
             save_path = get_thold_plot_path(p)
             fig.savefig(save_path, dpi=300)
@@ -310,7 +314,7 @@ def test_thresholds(p, num_test=500, num_updates=3.1, deriv_fs=None,
     return tholds, pr_errs, (fig, ax)
 
 
-def make_thold_plot(p, tholds, pr_errs):
+def make_thold_plot(p, tholds, pr_errs, num_test):
     """
     helper for test_thresholds; makes the a, b plot.
     """
