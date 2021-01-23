@@ -1,5 +1,6 @@
 from copy import deepcopy
 import json
+from matplotlib.cm import get_cmap
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.integrate import odeint
@@ -9,6 +10,7 @@ from derivs import *
 from helpers import *
 from rules import *
 
+THOLDPLOTS_FOLDER = 'threshold_plots/'
 
 class LorenzParams:
     """
@@ -28,32 +30,33 @@ class LorenzParams:
         self.nudge = nudge
 
         # list for storing guesses
-        self.prs = [pr]
+        self.prs = [pr0]
 
         # condition number
-        cn = int(rule[rule.find('_c')+2:])
+        if rule != 'no_update':
+            cn = int(rule[rule.find('_c')+2:])
 
-        if cn == 0:
-            pass
+            if cn == 0:
+                pass
 
-        if cn == 1:
-            if 'a0' in kwargs:
-                self.a0 = kwargs['a0']  # initial
-                self.a = kwargs['a0'] # current
-                self.a_list = []
-            if 'b0'in kwargs:
-                self.b0 = kwargs['b0']  # initial
-                self.b = kwargs['b0'] # current
-                self.b_list = []
-            if 'da' in kwargs:
-                self.da = kwargs['da']
-            if 'db' in kwargs:
-                self.db = kwargs['db']
+            if cn == 1 or cn == 3:
+                if 'a0' in kwargs:
+                    self.a0 = kwargs['a0']  # initial
+                    self.a = kwargs['a0'] # current
+                    self.a_list = []
+                if 'b0'in kwargs:
+                    self.b0 = kwargs['b0']  # initial
+                    self.b = kwargs['b0'] # current
+                    self.b_list = []
+                if 'da' in kwargs:
+                    self.da = kwargs['da']
+                if 'db' in kwargs:
+                    self.db = kwargs['db']
 
-        if cn == 1 or cn == 2:
-            if 'Tc' in kwargs:
-                self.Tc = kwargs['Tc']
-                self.T = 0
+            if cn == 1 or cn == 2 or cn == 3:
+                if 'Tc' in kwargs:
+                    self.Tc = kwargs['Tc']
+                    self.T = 0
 
     def reset_T(self):
         self.T = 0
@@ -142,8 +145,27 @@ def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
 #							run odeint
 # ------------------------------------------------------------------
 
-
 def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
+    """
+    main simulation function.
+
+    Parameters
+    ----------------
+    p : LorenzParams instance
+    sim_time : units of time to run simulation
+    deriv_fs : functions defining the time derivatives of the Lorenz + nudged system.
+    complete_msg (boolean) : set to True to print message with error and runtime upon
+                            completion.
+    """
+    # initialize system
+    X0, Xt0 = get_ic(p)
+    XU0 = np.append(X0, [0.1, 0.1, 0.1]) # initialize nudged slightly away from origin
+    XUt0 = np.append(Xt0, [0, 0, 0])
+    s = LorenzState(XU0, XUt0)
+
+    # list of times to solve the equation
+    t = np.arange(0, sim_time, step=p.dt)
+
     # set get_pr
     get_pr, rule_f = map_rule_to_f(p.rule)
 
@@ -151,19 +173,11 @@ def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
     if deriv_fs == None:
         deriv_fs = get_deriv_fs(p.nudge)
 
-    # initialize system
-    X0, Xt0 = get_ic(p)
-    XU0 = np.append(X0, [0.1, 0.1, 0.1])
-    XUt0 = np.append(Xt0, [0, 0, 0])
-    s = LorenzState(XU0, XUt0)
-
-    # list of times to solve the equation
-    t = np.arange(0, sim_time, step=p.dt)
-
+    # run sim
     start = time.time()
-    sol, infodict = odeint(nudged_lorenz, XU0, t, args=(
-        s, p, deriv_fs, get_pr, rule_f), full_output=True,
-        mxstep=100)
+    sol, infodict = odeint(nudged_lorenz, XU0, t, 
+                            args=(s, p, deriv_fs, get_pr, rule_f), 
+                            full_output=True, mxstep=100)
 
     # print completed message
     if complete_msg:
@@ -171,7 +185,7 @@ def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
         print('Final Prandtl error: {:.8f}. Runtime: {:.4f} s'.format(final_err, 
             time.time() - start))
 
-    # transform list of guesses to be same shape as output
+    # reshape list of guesses to match output
     nfe = infodict['nfe']
     try:
         prs = np.array(p.prs)[nfe]
@@ -180,7 +194,7 @@ def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
         return np.empty(0), np.empty(0), np.empty(0), infodict
 
     # this is to ensure prs has the same shape as the solution
-    prs = np.append(prs, p.pr0)
+    prs = np.append(prs, p.prs[-1])
 
     # calculate derivatives
     s_ = LorenzState(sol.T, np.zeros(6))
@@ -197,7 +211,8 @@ def pick_best_threshold(p, tholds, errs):
     Pick a,b from results of test_thresholds.
     """
     if min(errs) >= abs(p.PR - p.pr0):
-        print('None of the thresholds tested result in error below the initial error. Returning original thresholds.')
+        print('None of the thresholds tested result in error below the initial error.',
+            'Returning original thresholds.')
         return p.a0, p.b0
 
     minerr_tholds = tholds[errs == min(errs)]
@@ -205,24 +220,30 @@ def pick_best_threshold(p, tholds, errs):
     return a, b
 
 
-def test_thresholds(p, num=500, deriv_fs=None, plot=True):
+def test_thresholds(p, num_test=500, num_updates=3.1, deriv_fs=None, 
+                    make_plot=True, save_plot=False):
     """
     This function generates a range of values for the a,b parameters and
     randomly tests 500 (default) of them.
 
-    Does not alter p.
+    Parameters
+    ----------------
+    p : instance of LorenzParams; must have the attribute 'Tc'.
+    num_test : number of values of a0, b0 to test
+    num_updates : simulation time for each a0, b0 calculated by Tc * num_updates.
+    deriv_fs : functions defining the time derivatives of the Lorenz + nudged system.
+    make_plot (boolean) : set to True to plot a0, b0 with parameter errors.
+    save_plot (boolean) : set to True to save plot to THOLDPLOTS_FOLDER.
     """
-    # sim time for a_, b_
-    if hasattr(p, 'Tc'):
-        sim_time = 1.1 * p.Tc
-    else:
-        sim_time = 5
+    assert hasattr(p, 'Tc'), 'LorenzParams must have the attribute "Tc".'
 
-    # run first sim to determine range of a, b to test
+    # run sim to determine range of a, b to test
+    sim_time = 1.1 * p.Tc
     p_ = deepcopy(p)
-    p_.Tc = np.inf # lazy way to prevent guess from updating
+    p_.Tc = np.inf # prevent guess from updating
     sol, derivs, _, _ = simulate(p_, sim_time=sim_time, complete_msg=False)
 
+    # calculate position and velocity errors
     if p.nudge == 'u':
         i1 = 0
         i2 = 3
@@ -235,19 +256,18 @@ def test_thresholds(p, num=500, deriv_fs=None, plot=True):
 
     pos_err = abs(sol[:, i1] - sol[:, i2])
     vel_err = abs(derivs[:, i1] - derivs[:, i2])
-    a_ = np.min(pos_err)
-    b_ = np.min(vel_err)
 
-    # generate grid from [-3, 3]^2 with mesh size 0.01
-    a_min = max(0, a_-3)
-    a_max = a_ + 3
-    b_min = max(0, b_-3)
-    b_max = b_ + 3
+    # generate grid
+    a_min = min(pos_err)
+    a_max = np.mean(pos_err) * 3
+    b_min = min(vel_err)
+    b_max = np.mean(vel_err) * 3
+
     grid = np.mgrid[a_min:a_max:0.01,b_min:b_max:0.01].T.reshape(-1,2)
 
     # randomly choose (a,b) to test
     num_pairs = grid.shape[0]
-    C = np.random.choice(range(num_pairs), num)
+    C = np.random.choice(range(num_pairs), num_test)
     tholds = grid[C]
 
     # sim time for testing
@@ -256,10 +276,10 @@ def test_thresholds(p, num=500, deriv_fs=None, plot=True):
     else:
         sim_time = 15
 
-    errs = []
+    pr_errs = []
     delete_ind = []
     start = time.time()
-    for i in range(C.size):
+    for i in range(num_test):
         ind = C[i]
         p_ = deepcopy(p)
         p_.a = grid[ind, 0]
@@ -267,54 +287,78 @@ def test_thresholds(p, num=500, deriv_fs=None, plot=True):
 
         _, _, prs, _ = simulate(p_, sim_time=sim_time, complete_msg=False)
 
-        if prs.size > 0: # skip sims where excessive calls were made
-            errs.append(abs(prs[-1] - p.PR))
-        else:
-            # delete from tholds
-            delete_ind.append(i)
+        if prs.size > 0:
+            pr_errs.append(abs(prs[-1] - p.PR))
+        else: # skip sims where excessive calls were made
+            delete_ind.append(i) # delete from tholds
 
-        if (i + 1) % (num / 10) == 0:
-            print('{0:} % complete. {1:.4f} sec elapsed.'.format(100*(i+1)//num, 
+        if (i + 1) % (num_test / 10) == 0:
+            print('{0:} % complete. {1:.4f} sec elapsed.'.format(100*(i+1)//num_test, 
                 time.time()-start))
 
     tholds = np.delete(tholds, delete_ind, axis=0)
-    errs = np.array(errs)
+    pr_errs = np.array(pr_errs)
 
-    if plot:
-        # ---------------------make colormap----------------------------------
-        orig = matplotlib.cm.get_cmap('bwr', 6)
-        errlog = np.log10(errs)
+    C = np.log10(abs(p.PR - p.pr0))
+    if make_plot:
+        fig, ax = make_thold_plot(p, tholds, pr_errs)
 
-        if np.all(errlog >= 1): # only red dots occur
-            cmap = truncate_colormap(orig, 0.5, 0.99)
+        if save_plot:
+            save_path = get_thold_plot_path(p)
+            fig.savefig(save_path, dpi=300)
 
-        elif np.any(errlog > 1): # red and blue dots occur
-            mp = (1 - min(errlog)) / (max(errlog) - min(errlog))
-            if mp < 0: 
-                cmap = orig
-            else: 
-                cmap = shiftedColorMap(orig, midpoint=mp, name='shifted')
-                
-        else: # no red dots occur
-            cmap = truncate_colormap(orig, 0, 0.49)
+    return tholds, pr_errs, (fig, ax)
 
-        plt.figure(figsize=(4.5,3.5))
 
-        # plot points w no update
-        ind = np.where(errlog == 1)
-        plt.scatter(tholds[ind, 0], tholds[ind, 1], color='white', edgecolor='k', s=50)
+def make_thold_plot(p, tholds, pr_errs):
+    """
+    helper for test_thresholds; makes the a, b plot.
+    """
+    C = np.log10(abs(p.PR - p.pr0))
 
-        # plot everything else
-        ind = np.where(errlog != 1)
+    # make colormap
+    orig = get_cmap('bwr', 6)
+    errlog = np.log10(pr_errs)
 
-        sc = plt.scatter(tholds[ind, 0], tholds[ind, 1], s=50, c=errlog[ind], 
-            edgecolor='k', cmap=cmap)
+    if np.all(errlog >= C): # only red dots occur
+        cmap = truncate_colormap(orig, 0.5, 0.99)
 
-        plt.colorbar(sc)
-        plt.xlabel('a')
-        plt.ylabel('b')
-        plt.title('Error for various (a,b)')
-        plt.gca().set_facecolor('lightgray')
-        plt.show()
+    elif np.any(errlog > C): # red and blue dots occur
+        mp = (C - min(errlog)) / (max(errlog) - min(errlog))
+        if mp < 0: 
+            cmap = orig
+        else: 
+            cmap = shiftedColorMap(orig, midpoint=mp, name='shifted')
+            
+    else: # only blue dots occur
+        cmap = truncate_colormap(orig, 0, 0.49)
 
-    return tholds, errs
+    fig, ax = plt.subplots(1, figsize=(3.5,3))
+
+    # plot points w no update
+    ind = np.where(errlog == C)
+    plt.scatter(tholds[ind, 0], tholds[ind, 1], color='white', edgecolor='k', s=30)
+
+    # plot everything else
+    ind = np.where(errlog != C)
+
+    sc = plt.scatter(tholds[ind, 0], tholds[ind, 1], s=30, c=errlog[ind], 
+        edgecolor='k', cmap=cmap)
+
+    plt.colorbar(sc)
+    plt.title(r'$n=$'+str(num_test))
+    plt.xlabel(r'$\alpha_0$')
+    plt.ylabel(r'$\beta_0$')
+    ax.set_facecolor('lightgray')
+    plt.tight_layout()
+
+    return fig, ax
+
+
+def get_thold_plot_path(p):
+    """
+    helper for test_thresholds; get path for saving figure.
+    """
+    s = get_sim_folder(p)
+    s = s[:s.find('a_')] + s[s.find('Tc'):-1]
+    return THOLDPLOTS_FOLDER + s

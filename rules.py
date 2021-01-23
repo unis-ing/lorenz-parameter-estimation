@@ -20,10 +20,15 @@ def map_rule_to_f(rule):
 
         if cn == 0:
             get_pr = apply_nothing
-        if cn == 1:
+        elif cn == 1:
             get_pr = apply_thresholds_and_Tc
         elif cn == 2:
             get_pr = apply_Tc
+
+        # ------------------------------------
+        elif cn == 3:
+            get_pr = test
+        # ------------------------------------
 
     return get_pr, rule_f
 
@@ -50,6 +55,14 @@ def rule2z(s, p):
 def rule2w(s, p):
     its = int(p.Tc / p.dt)
     return -1 - np.mean(s.w_list[-its:])
+
+
+def rule0(s, p):
+    return (p.pr * (s.u - s.v)) / (s.x - s.v)
+
+def rule3(s, p):
+    return s.w - (s.u*s.v - p.mu*(s.w-s.z)) / p.B + p.pr
+
 
 # ------------------------------------------------------------------
 #                           conditions
@@ -105,6 +118,31 @@ def apply_Tc(s, p, rule_f, t):
         p.reset_T()
         return rule_f(s, p)
         
+    else:
+        p.update_T(t_curr=t, t_old=s.t)
+        return p.pr
+
+
+def test(s, p, rule_f, t):
+    """ condition # 3 """
+    poserr = abs(s.y - s.v)
+    velerr = abs(s.xt - s.ut)
+
+    # check conditions are met
+    c1 = p.T >= p.Tc
+    c2 = poserr <= p.a
+    c3 = velerr <= p.b
+    c4 = (poserr > 0) & (velerr > 0)
+
+    if c1 & c2 & c3 & c4:
+        p.decrease_a()
+        p.decrease_b()
+        p.update_a_list()
+        p.update_b_list()
+        p.reset_T()
+
+        return rule_f(s, p)
+
     else:
         p.update_T(t_curr=t, t_old=s.t)
         return p.pr

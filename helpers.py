@@ -1,3 +1,4 @@
+import json
 import h5py as h5
 import matplotlib.colors as colors
 import matplotlib.pyplot as plt
@@ -154,12 +155,12 @@ def save_ic(p, sol, derivs):
 
     # store data as .h5
     f = h5.File(path, 'w')
-    f.create_dataset('x', data=sol[-1, 0])
-    f.create_dataset('y', data=sol[-1, 1])
-    f.create_dataset('z', data=sol[-1, 2])
-    f.create_dataset('xt', data=derivs[-1, 0])
-    f.create_dataset('yt', data=derivs[-1, 1])
-    f.create_dataset('zt', data=derivs[-1, 2])
+    f.create_dataset('x', data=sol[:, 0])
+    f.create_dataset('y', data=sol[:, 1])
+    f.create_dataset('z', data=sol[:, 2])
+    f.create_dataset('xt', data=derivs[:, 0])
+    f.create_dataset('yt', data=derivs[:, 1])
+    f.create_dataset('zt', data=derivs[:, 2])
     f.close()
 
 def get_ic(p):
@@ -220,13 +221,19 @@ def shiftedColorMap(cmap, start=0, midpoint=0.5, stop=1.0, name='shiftedcmap'):
         cdict['blue'].append((si, b, b))
         cdict['alpha'].append((si, a, a))
 
-    newcmap = colors.LinearSegmentedColormap(name, cdict)
-    plt.register_cmap(cmap=newcmap)
+    new_cmap = colors.LinearSegmentedColormap(name, cdict)
+    plt.register_cmap(cmap=new_cmap)
 
-    return newcmap
+    return new_cmap
+
 
 def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=100):
     new_cmap = colors.LinearSegmentedColormap.from_list(
         'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
         cmap(np.linspace(minval, maxval, n)))
     return new_cmap
+
+
+def running_mean(x, N):
+    cumsum = np.cumsum(np.insert(x, 0, 0)) 
+    return (cumsum[N:] - cumsum[:-N]) / float(N)
