@@ -39,21 +39,19 @@ class LorenzParams:
             if cn == 0:
                 pass
 
-            if cn == 1 or cn == 3:
+            if cn != 2:
                 if 'a0' in kwargs:
                     self.a0 = kwargs['a0'] # initial
                     self.a = kwargs['a0'] # current
-                    self.a_list = []
                 if 'b0'in kwargs:
                     self.b0 = kwargs['b0'] # initial
                     self.b = kwargs['b0'] # current
-                    self.b_list = []
                 if 'da' in kwargs:
                     self.da = kwargs['da']
                 if 'db' in kwargs:
                     self.db = kwargs['db']
 
-            if cn == 1 or cn == 2 or cn == 3:
+            if cn != 0:
                 if 'Tc' in kwargs:
                     self.Tc = kwargs['Tc']
                     self.T = 0
@@ -71,12 +69,6 @@ class LorenzParams:
     def decrease_b(self):
         self.b *= self.db
 
-    def update_a_list(self):
-        self.a_list.append(self.a)
-
-    def update_b_list(self):
-        self.b_list.append(self.b)
-
 
 class LorenzState:
     """
@@ -87,11 +79,11 @@ class LorenzState:
         self.x, self.y, self.z, self.u, self.v, self.w = XU
         self.xt, self.yt, self.zt, self.ut, self.vt, self.wt = XUt
 
+        self.x_list = []
         self.z_list = []
         self.w_list = []
 
-        self.t_prev = 0 # store prev simulation time
-        self.x_ = 0 # previous value of x
+        self.te_list = [] # list of eval times
 
 # ------------------------------------------------------------------
 #                   function called by odeint
@@ -115,31 +107,24 @@ def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
     p.prs.append(next_pr)
 
     # update s with positions
-    s.x_ = s.x
     s.x, s.y, s.z, s.u, s.v, s.w = XU
 
-    # update z_list, w_list (only used for rule2z/2w but it doesn't hurt)
+    # update x_list, z_list, w_list (last two only used for 
+    #                               rule2z/2w but it doesn't hurt)
+    s.x_list.append(s.x)
     s.z_list.append(s.z)
     s.w_list.append(s.w)
 
-    # calculate new time deriv's with new pr
-    xt = derivs[0](s, p)
-    yt = derivs[1](s, p)
-    zt = derivs[2](s, p)
-    ut = derivs[3](s, p)
-    vt = derivs[4](s, p)
-    wt = derivs[5](s, p)
+    # store prev time
+    s.te_list.append(t)
 
-    # update s with new time derivatives
-    s.xt = xt
-    s.yt = yt
-    s.zt = zt
-    s.ut = ut
-    s.vt = vt
-    s.wt = wt
-
-    # store prev, current time
-    s.t_prev = t
+    # calculate new time deriv's with new pr & update s
+    s.xt = xt = derivs[0](s, p)
+    s.yt = yt = derivs[1](s, p)
+    s.zt = zt = derivs[2](s, p)
+    s.ut = ut = derivs[3](s, p)
+    s.vt = vt = derivs[4](s, p)
+    s.wt = wt = derivs[5](s, p)
 
     return [xt, yt, zt, ut, vt, wt]
 
@@ -192,7 +177,8 @@ def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
     try:
         prs = np.array(p.prs)[nfe]
     except IndexError:
-        print('Indexing error in simulation. Returning empty arrays.')
+        print('Indexing error in simulation; returning empty arrays. Try',
+        're-running with different algorithm parameter values.')
         return np.empty(0), np.empty(0), np.empty(0), infodict
 
     # this is to ensure prs has the same shape as the solution
@@ -210,19 +196,22 @@ def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
 
 def pick_best_threshold(p, tholds, errs):
     """
-    Pick a,b from results of test_thresholds.
+    Pick a,b from results of test_thresholds. Return zeros if no values found
+    which result in improved parameter error.
     """
     if min(errs) >= abs(p.PR - p.pr0):
-        print('None of the thresholds tested result in error below the initial error.',
-            'Returning original thresholds.')
-        return p.a0, p.b0
+        a_interval = '[{:.2f}, {:.2f}]'.format(min(tholds[:,0]), max(tholds[:,0]))
+        b_interval = '[{:.2f}, {:.2f}]'.format(min(tholds[:,1]), max(tholds[:,1]))
+        print('None of the thresholds (a,b) tested in the region', a_interval, 'x', 
+            b_interval, 'result in improved parameter error. Returning zeros.')
+        return 0, 0
 
     minerr_tholds = tholds[errs == min(errs)]
     a, b = minerr_tholds[np.sum(minerr_tholds, 1).argmin()]
     return a, b
 
 
-def test_thresholds(p, num_test=500, num_updates=3.1, deriv_fs=None, 
+def test_thresholds(p, num_test=500, num_updates=3, deriv_fs=None, 
                     make_plot=True, save_plot=False):
     """
     This function generates a range of values for the a,b parameters and
@@ -232,7 +221,7 @@ def test_thresholds(p, num_test=500, num_updates=3.1, deriv_fs=None,
     ----------------
     p : instance of LorenzParams; must have the attribute 'Tc'.
     num_test : number of values of a0, b0 to test
-    num_updates : simulation time for each a0, b0 calculated by Tc * num_updates.
+    num_updates : simulation time for each a0, b0 calculated by Tc * (num_updates + 0.1).
     deriv_fs : functions defining the time derivatives of the Lorenz + nudged system.
     make_plot (boolean) : set to True to plot a0, b0 with parameter errors.
     save_plot (boolean) : set to True to save plot to THOLDPLOTS_FOLDER.
@@ -261,10 +250,10 @@ def test_thresholds(p, num_test=500, num_updates=3.1, deriv_fs=None,
     vel_err = abs(derivs[:, i1] - derivs[:, i2])
 
     # generate grid
-    a_min = min(pos_err)
-    a_max = np.mean(pos_err) * 3
-    b_min = min(vel_err)
-    b_max = np.mean(vel_err) * 3
+    a_min = round(min(pos_err), 2)
+    a_max = round(np.mean(pos_err) * 3, 2)
+    b_min = round(min(vel_err), 2)
+    b_max = round(np.mean(vel_err) * 3, 2)
 
     grid = np.mgrid[a_min:a_max:0.01,b_min:b_max:0.01].T.reshape(-1,2)
 
@@ -275,7 +264,7 @@ def test_thresholds(p, num_test=500, num_updates=3.1, deriv_fs=None,
 
     # sim time for testing
     if hasattr(p, 'Tc'):
-        sim_time = 3.1 * p.Tc
+        sim_time = (num_updates + 0.1) * p.Tc
     else:
         sim_time = 15
 
@@ -364,5 +353,5 @@ def get_thold_plot_path(p):
     helper for test_thresholds; get path for saving figure.
     """
     s = get_sim_folder(p)
-    s = s[:s.find('a_')] + s[s.find('Tc'):-1]
+    s = s[:s.find('a_')] + s[s.find('da'):-1]
     return THOLDPLOTS_FOLDER + s

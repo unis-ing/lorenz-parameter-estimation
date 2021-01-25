@@ -89,10 +89,6 @@ def save_sim(p, sol, derivs, prs, parent_folder=SIM_FOLDER, check_exists=True):
     f.create_dataset('vt', data=derivs[:, 4])
     f.create_dataset('wt', data=derivs[:, 5])
 
-    if 'a' in p.__dict__:
-        f.create_dataset('a', data=p.a_list)
-    if 'b' in p.__dict__:
-        f.create_dataset('b', data=p.b_list)
     f.close()
 
     # copy dictionary with parameters
@@ -103,11 +99,7 @@ def save_sim(p, sol, derivs, prs, parent_folder=SIM_FOLDER, check_exists=True):
     # remove attributes that won't be stored
     if 'a' in param_dict: 
         param_dict.pop('a')
-        param_dict.pop('da')
-        param_dict.pop('a_list')
         param_dict.pop('b')
-        param_dict.pop('db')
-        param_dict.pop('b_list')
 
     if 'T' in param_dict:
         param_dict.pop('T')

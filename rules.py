@@ -26,6 +26,8 @@ def map_rule_to_f(rule):
             get_pr = apply_Tc
         elif cn == 3:
             get_pr = apply_approx_thresholds_and_Tc
+        elif cn == 4:
+            get_pr = test
 
     return get_pr, rule_f
 
@@ -52,13 +54,6 @@ def rule2z(s, p):
 def rule2w(s, p):
     its = int(p.Tc / p.dt)
     return -1 - np.mean(s.w_list[-its:])
-
-
-# def rule0(s, p):
-#     return (p.pr * (s.u - s.v)) / (s.x - s.v)
-
-# def rule3(s, p):
-#     return s.w - (s.u*s.v - p.mu*(s.w-s.z)) / p.B + p.pr
 
 
 # ------------------------------------------------------------------
@@ -97,14 +92,14 @@ def apply_thresholds_and_Tc(s, p, rule_f, t):
     if c1 & c2 & c3 & c4:
         p.decrease_a()
         p.decrease_b()
-        p.update_a_list()
-        p.update_b_list()
         p.reset_T()
 
         return rule_f(s, p)
 
     else:
-        p.update_T(t_curr=t, t_old=s.t_prev)
+        te = s.te_list
+        if len(te) > 0:
+            p.update_T(t_curr=t, t_old=te[-1])
         return p.pr
 
 
@@ -116,33 +111,71 @@ def apply_Tc(s, p, rule_f, t):
         return rule_f(s, p)
         
     else:
-        p.update_T(t_curr=t, t_old=s.t_prev)
+        te = s.te_list
+        if len(te) > 0:
+            p.update_T(t_curr=t, t_old=te[-1])
         return p.pr
+
 
 def apply_approx_thresholds_and_Tc(s, p, rule_f, t):
     """ condition # 3 """
-    p.update_T(t_curr=t, t_old=s.t_prev)
+    te = s.te_list
 
-    if s.t_prev <= p.dt: # need at least 2 elem's in x_list
+    if len(te) < 2: # need at least 2 elem's in x_list, te_list
         return p.pr
     else:
-        if t != s.t_prev:
-            poserr = abs(s.x - s.u)
-            finite_diff = (s.x - s.x_) / (t - s.t_prev)
-            velerr = abs(finite_diff - s.ut)
+        p.update_T(t_curr=t, t_old=te[-1])
+        t1 = te[-2]
+        t2 = te[-1]
+        if t1 != t2: # sometimes nudged_lorenz is eval'd at same t twice
+            x1 = s.x_list[-2]
+            x2 = s.x_list[-1]
+            poserr = abs(x2 - x1)
+            xt_approx = (x2 - x1) / (t2 - t1)
+            velerr = abs(xt_approx - s.ut)
 
             # check conditions are met
             c1 = p.T >= p.Tc
             c2 = poserr <= p.a
             c3 = velerr <= p.b
-            c4 = (poserr > 0) & (velerr > 0)
 
-            if c1 & c2 & c3 & c4:
+            if c1 & c2 & c3:
                 p.decrease_a()
                 p.decrease_b()
-                p.update_a_list()
-                p.update_b_list()
                 p.reset_T()
+
+                return rule_f(s, p)
+
+    return p.pr
+
+
+#----------------------------------------------
+def test(s, p, rule_f, t):
+    """ condition # 4 """
+    te = s.te_list
+
+    if len(te) < 2: # need at least 2 elem's in x_list, te_list
+        return p.pr
+    else:
+        p.update_T(t_curr=t, t_old=te[-1])
+        t1 = te[-2]
+        t2 = te[-1]
+        if t1 != t2: # sometimes nudged_lorenz is eval'd at same t twice
+            x1 = s.x_list[-2]
+            x2 = s.x_list[-1]
+            poserr = abs(x2 - x1)
+            xt_approx = (x2 - x1) / (t2 - t1)
+            velerr = abs(xt_approx - s.ut)
+
+            # check conditions are met
+            c1 = p.T >= p.Tc
+            # c2 = poserr <= p.a
+            # c3 = velerr <= p.b
+
+            if c1:
+                p.reset_T()
+                # if te[-1] >= 30:
+                #     p.a *= 0.1
 
                 return rule_f(s, p)
 
