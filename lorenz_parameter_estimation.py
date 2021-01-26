@@ -132,7 +132,7 @@ def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
 #							run odeint
 # ------------------------------------------------------------------
 
-def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
+def simulate(p, sim_time, deriv_fs=None, complete_msg=True, print_err=True):
     """
     main simulation function.
 
@@ -177,8 +177,9 @@ def simulate(p, sim_time, deriv_fs=None, complete_msg=True):
     try:
         prs = np.array(p.prs)[nfe]
     except IndexError:
-        print('Indexing error in simulation; returning empty arrays. Try',
-        're-running with different algorithm parameter values.')
+        if print_err:
+            print('Indexing error in simulation; returning empty arrays. Try',
+            're-running with different algorithm parameter values.')
         return np.empty(0), np.empty(0), np.empty(0), infodict
 
     # this is to ensure prs has the same shape as the solution
@@ -249,47 +250,47 @@ def test_thresholds(p, num_test=500, num_updates=3, deriv_fs=None,
     pos_err = abs(sol[:, i1] - sol[:, i2])
     vel_err = abs(derivs[:, i1] - derivs[:, i2])
 
-    # generate grid
+    # count num elt's in grid
     a_min = round(min(pos_err), 2)
     a_max = round(np.mean(pos_err) * 3, 2)
     b_min = round(min(vel_err), 2)
     b_max = round(np.mean(vel_err) * 3, 2)
 
-    grid = np.mgrid[a_min:a_max:0.01,b_min:b_max:0.01].T.reshape(-1,2)
+    step = 0.01
+    num_a = int((a_max - a_min) / step + 1)
+    num_b = int((b_max - b_min) / step + 1)
+    num_pairs = num_a * num_b
 
-    # randomly choose (a,b) to test
-    num_pairs = grid.shape[0]
-    C = np.random.choice(range(num_pairs), num_test)
-    tholds = grid[C]
+    # generate random indices of elt's in grid
+    C = np.random.randint(low=0, high=num_pairs-1, size=num_test)
 
     # sim time for testing
-    if hasattr(p, 'Tc'):
-        sim_time = (num_updates + 0.1) * p.Tc
-    else:
-        sim_time = 15
+    sim_time = (num_updates + 0.1) * p.Tc
 
     pr_errs = []
-    delete_ind = []
+    tholds = []
+
     start = time.time()
     for i in range(num_test):
-        ind = C[i]
+        c = C[i]
         p_ = deepcopy(p)
-        p_.a = grid[ind, 0]
-        p_.b = grid[ind, 1]
+        a0 = a_min + step * (c % num_a)
+        b0 = b_min + step * (c - c % num_a) / num_a
+        p_.a = a0
+        p_.b = b0
 
-        _, _, prs, _ = simulate(p_, sim_time=sim_time, complete_msg=False)
+        _, _, prs, _ = simulate(p_, sim_time=sim_time, complete_msg=False, print_err=False)
 
-        if prs.size > 0:
+        if prs.size > 0: # skip sims where excessive calls were made
             pr_errs.append(abs(prs[-1] - p.PR))
-        else: # skip sims where excessive calls were made
-            delete_ind.append(i) # delete from tholds
+            tholds.append([a0, b0])
 
         if (i + 1) % (num_test / 10) == 0:
             print('{0:} % complete. {1:.4f} sec elapsed.'.format(100*(i+1)//num_test, 
                 time.time()-start))
 
-    tholds = np.delete(tholds, delete_ind, axis=0)
     pr_errs = np.array(pr_errs)
+    tholds = np.array(tholds)
 
     # create plot
     if make_plot:
@@ -339,7 +340,10 @@ def make_thold_plot(p, tholds, pr_errs, num_test):
         edgecolor='k', cmap=cmap)
 
     plt.colorbar(sc)
+    #-----------------------------------------------------------
+    # plt.title(r'$\mu=$'+str(p.mu))
     plt.title(r'$n=$'+str(num_test))
+    #-----------------------------------------------------------
     plt.xlabel(r'$\alpha_0$')
     plt.ylabel(r'$\beta_0$')
     ax.set_facecolor('lightgray')
