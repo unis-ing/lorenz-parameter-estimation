@@ -97,7 +97,7 @@ def apply_thresholds_and_Tc(s, p, rule_f, t):
         return rule_f(s, p)
 
     else:
-        te = s.te_list
+        te = s.tfe
         if len(te) > 0:
             p.update_T(t_curr=t, t_old=te[-1])
         return p.pr
@@ -111,7 +111,7 @@ def apply_Tc(s, p, rule_f, t):
         return rule_f(s, p)
         
     else:
-        te = s.te_list
+        te = s.tfe
         if len(te) > 0:
             p.update_T(t_curr=t, t_old=te[-1])
         return p.pr
@@ -119,9 +119,9 @@ def apply_Tc(s, p, rule_f, t):
 
 def apply_approx_thresholds_and_Tc(s, p, rule_f, t):
     """ condition # 3 """
-    te = s.te_list
+    te = s.tfe
 
-    if len(te) < 2: # need at least 2 elem's in x_list, te_list
+    if len(te) < 2: # need at least 2 elem's in x_list, tfe
         return p.pr
     else:
         p.update_T(t_curr=t, t_old=te[-1])
@@ -152,9 +152,9 @@ def apply_approx_thresholds_and_Tc(s, p, rule_f, t):
 #----------------------------------------------
 def test(s, p, rule_f, t):
     """ condition # 4 """
-    te = s.te_list
+    te = s.tfe
 
-    if len(te) < 2: # need at least 2 elem's in x_list, te_list
+    if len(te) < 2: # need at least 2 elem's in x_list, tfe
         return p.pr
     else:
         p.update_T(t_curr=t, t_old=te[-1])

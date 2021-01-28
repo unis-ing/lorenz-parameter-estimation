@@ -3,7 +3,7 @@ import json
 from matplotlib.cm import get_cmap
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.integrate import odeint
+from scipy.integrate import solve_ivp
 import time
 
 from derivs import *
@@ -83,13 +83,13 @@ class LorenzState:
         self.z_list = []
         self.w_list = []
 
-        self.te_list = [] # list of eval times
+        self.tfe = [] # list of times at which function is evaluated
 
 # ------------------------------------------------------------------
 #                   function called by odeint
 # ------------------------------------------------------------------
 
-def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
+def nudged_lorenz(t, XU, s, p, derivs, get_pr, rule_f):
     """
     Function called by odeint.
 
@@ -98,7 +98,6 @@ def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
     derivs : list of functions which implement the time derivatives.
     get_pr : function which returns the next guess.
     rule_f : function which implements the Prandtl estimate (called by get_pr).
-
     """
 
     # update p based on XU (values from the last function call)
@@ -116,7 +115,7 @@ def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
     s.w_list.append(s.w)
 
     # store prev time
-    s.te_list.append(t)
+    s.tfe.append(t)
 
     # calculate new time deriv's with new pr & update s
     s.xt = xt = derivs[0](s, p)
@@ -132,7 +131,7 @@ def nudged_lorenz(XU, t, s, p, derivs, get_pr, rule_f):
 #							run odeint
 # ------------------------------------------------------------------
 
-def simulate(p, sim_time, deriv_fs=None, complete_msg=True, print_err=True):
+def simulate(p, sim_time, deriv_fs=None, complete_msg=True, print_err=True, err_thold=20):
     """
     main simulation function.
 
@@ -151,7 +150,8 @@ def simulate(p, sim_time, deriv_fs=None, complete_msg=True, print_err=True):
     s = LorenzState(XU0, XUt0)
 
     # list of times to solve the equation
-    t = np.arange(0, sim_time, step=p.dt)
+    t_span = [0, sim_time]
+    t_eval = np.arange(0, sim_time, step=p.dt)
 
     # set get_pr
     get_pr, rule_f = map_rule_to_f(p.rule)
@@ -160,11 +160,24 @@ def simulate(p, sim_time, deriv_fs=None, complete_msg=True, print_err=True):
     if deriv_fs == None:
         deriv_fs = get_deriv_fs(p.nudge)
 
+    # define event for exiting on high Prandtl error
+    def high_error_event(t, *XU):
+        if abs(p.PR - p.pr) >= err_thold:
+            thold_exceeded = True
+            return 0
+        else:
+            return 1
+    high_error_event.terminal = True
+
     # run sim
     start = time.time()
-    sol, infodict = odeint(nudged_lorenz, XU0, t, 
-                            args=(s, p, deriv_fs, get_pr, rule_f), 
-                            full_output=True, mxstep=100)
+    sol = solve_ivp(nudged_lorenz, t_span=t_span, y0=XU0, 
+                    t_eval=t_eval, method='LSODA',
+                    args=(s, p, deriv_fs, get_pr, rule_f),
+                    events=high_error_event, max_step=10)
+
+    # termination status
+    err_exceeded = sol.status == 1
 
     # print completed message
     if complete_msg:
@@ -172,24 +185,26 @@ def simulate(p, sim_time, deriv_fs=None, complete_msg=True, print_err=True):
         print('Final Prandtl error: {:.4e}. Runtime: {:.4f} s'.format(final_err, 
             time.time() - start))
 
-    # reshape list of guesses to match output
-    nfe = infodict['nfe']
+    # reconstruct nfe from odeint
+    t_last = (s.tfe[-1] // p.dt) * p.dt
+    t_actual = np.arange(0, t_last, step=p.dt)
+    nfe = np.searchsorted(s.tfe, t_actual)
+
+    # reshape prs to match shape of t_eval
     try:
         prs = np.array(p.prs)[nfe]
+        prs = np.append(prs, prs[-1])
     except IndexError:
         if print_err:
             print('Indexing error in simulation; returning empty arrays. Try',
             're-running with different algorithm parameter values.')
-        return np.empty(0), np.empty(0), np.empty(0), infodict
-
-    # this is to ensure prs has the same shape as the solution
-    prs = np.append(prs, p.prs[-1])
 
     # calculate derivatives
-    s_ = LorenzState(sol.T, np.zeros(6))
+    y = sol.y
+    s_ = LorenzState(y, np.zeros(6))
     derivs = np.array([deriv_fs[i](s_, p) for i in range(6)]).T
 
-    return sol, derivs, prs, infodict
+    return y.T, derivs, prs, err_exceeded
 
 # ------------------------------------------------------------------
 #                    determine thresholds a, b
@@ -212,7 +227,7 @@ def pick_best_threshold(p, tholds, errs):
     return a, b
 
 
-def test_thresholds(p, num_test=500, num_updates=3, deriv_fs=None, 
+def test_thresholds(p, num_test=500, num_updates=3, deriv_fs=None,
                     make_plot=True, save_plot=False):
     """
     This function generates a range of values for the a,b parameters and
@@ -251,9 +266,9 @@ def test_thresholds(p, num_test=500, num_updates=3, deriv_fs=None,
     vel_err = abs(derivs[:, i1] - derivs[:, i2])
 
     # count num elt's in grid
-    a_min = round(min(pos_err), 2)
+    a_min = round(min(pos_err) * 0.95, 2)
     a_max = round(np.mean(pos_err) * 3, 2)
-    b_min = round(min(vel_err), 2)
+    b_min = round(min(vel_err) * 0.95, 2)
     b_max = round(np.mean(vel_err) * 3, 2)
 
     step = 0.01
@@ -269,6 +284,7 @@ def test_thresholds(p, num_test=500, num_updates=3, deriv_fs=None,
 
     pr_errs = []
     tholds = []
+    bad_tholds = []
 
     start = time.time()
     for i in range(num_test):
@@ -279,9 +295,12 @@ def test_thresholds(p, num_test=500, num_updates=3, deriv_fs=None,
         p_.a = a0
         p_.b = b0
 
-        _, _, prs, _ = simulate(p_, sim_time=sim_time, complete_msg=False, print_err=False)
+        _, _, prs, err_exceeded = simulate(p_, sim_time=sim_time, 
+                                             complete_msg=False, print_err=False)
 
-        if prs.size > 0: # skip sims where excessive calls were made
+        if err_exceeded: # separate tholds where excessive calls were made
+            bad_tholds.append([a0, b0])
+        else:
             pr_errs.append(abs(prs[-1] - p.PR))
             tholds.append([a0, b0])
 
@@ -291,10 +310,11 @@ def test_thresholds(p, num_test=500, num_updates=3, deriv_fs=None,
 
     pr_errs = np.array(pr_errs)
     tholds = np.array(tholds)
+    bad_tholds = np.array(bad_tholds)
 
     # create plot
     if make_plot:
-        fig, ax = make_thold_plot(p, tholds, pr_errs, num_test)
+        fig, ax = make_thold_plot(p, tholds, bad_tholds, pr_errs, num_test)
 
         # save plot
         if save_plot:
@@ -304,7 +324,7 @@ def test_thresholds(p, num_test=500, num_updates=3, deriv_fs=None,
     return tholds, pr_errs, (fig, ax)
 
 
-def make_thold_plot(p, tholds, pr_errs, num_test):
+def make_thold_plot(p, tholds, bad_tholds, pr_errs, num_test):
     """
     helper for test_thresholds; makes the a, b plot.
     """
@@ -329,21 +349,23 @@ def make_thold_plot(p, tholds, pr_errs, num_test):
 
     fig, ax = plt.subplots(1, figsize=(3.5,3))
 
+    # plot bad tholds
+    if bad_tholds.size > 0:
+        plt.scatter(bad_tholds[:,0], bad_tholds[:,1], marker='x', color='k', s=30)
+
     # plot points w no update
     ind = np.where(errlog == C)
-    plt.scatter(tholds[ind, 0], tholds[ind, 1], color='white', edgecolor='k', s=30)
+    if ind[0].size > 0:
+        plt.scatter(tholds[ind, 0], tholds[ind, 1], color='white', edgecolor='k', s=30)
 
     # plot everything else
     ind = np.where(errlog != C)
-
-    sc = plt.scatter(tholds[ind, 0], tholds[ind, 1], s=30, c=errlog[ind], 
-        edgecolor='k', cmap=cmap)
-
-    plt.colorbar(sc)
-    #-----------------------------------------------------------
-    # plt.title(r'$\mu=$'+str(p.mu))
+    if ind[0].size > 0:
+        sc = plt.scatter(tholds[ind, 0], tholds[ind, 1], s=30, c=errlog[ind], 
+            edgecolor='k', cmap=cmap)
+        plt.colorbar(sc)
+        
     plt.title(r'$n=$'+str(num_test))
-    #-----------------------------------------------------------
     plt.xlabel(r'$\alpha_0$')
     plt.ylabel(r'$\beta_0$')
     ax.set_facecolor('lightgray')
